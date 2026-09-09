@@ -1,0 +1,49 @@
+@host = http://localhost:3000/api
+
+### Login
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+    "usuario": "admin",
+    "password": "123456"
+}
+
+###
+
+### Obtener empleados
+GET {{host}}/empleados
+
+###
+
+### Obtener empleado por id
+GET {{host}}/empleados/10
+
+###
+
+### Crear empleado
+POST {{host}}/empleados
+Content-Type: application/json
+
+{
+    "nombre": "Juan Perez",
+    "correo": "juan@test.com",
+    "telefono": "7221234567"
+}
+
+###
+
+### Actualizar empleado
+PUT {{host}}/empleados/10
+Content-Type: application/json
+
+{
+    "nombre": "Juan Perez Actualizado",
+    "correo": "juan.actualizado@test.com",
+    "telefono": "7229999999"
+}
+
+###
+
+### Eliminar empleado
+DELETE {{host}}/empleados/10
