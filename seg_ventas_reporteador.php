@@ -783,30 +783,30 @@
 				background:#185FA5;
 				background-image:linear-gradient(120deg, #185FA5, #0f4d8a);
 				color:white;
-				padding:10px 21px;
+				padding:12px 24px;
 				display:flex;
 				align-items:center;
-				gap:11px;
+				gap:13px;
 				flex-shrink:0;
 				border-bottom:2px solid #0b3a6b;
 			}
 
 			.mfi-header-avatar{
-				width:32px;
-				height:32px;
-				border-radius:10px;
+				width:37px;
+				height:37px;
+				border-radius:12px;
 				background:rgba(255,255,255,.16);
 				display:flex;
 				align-items:center;
 				justify-content:center;
-				font-size:13px;
+				font-size:15px;
 				flex-shrink:0;
 			}
 
 			.mfi-header-txt{ flex:1; min-width:0; }
 
 			.mfi-header h2{
-				font-size:13px;
+				font-size:15px;
 				font-weight:600;
 				letter-spacing:.01em;
 				white-space:nowrap;
@@ -815,7 +815,7 @@
 			}
 
 			.mfi-header .mfi-sub{
-				font-size:9.5px;
+				font-size:11px;
 				opacity:.8;
 				font-weight:500;
 				margin-top:1px;
@@ -832,18 +832,18 @@
 				background:rgba(255,255,255,.18);
 				border:1px solid rgba(255,255,255,.35);
 				color:white;
-				font-size:9.5px;
+				font-size:11px;
 				font-weight:700;
 				text-transform:uppercase;
 				letter-spacing:.04em;
-				padding:5px 12px;
+				padding:6px 14px;
 				border-radius:20px;
 				white-space:nowrap;
 			}
 
 			.mfi-btn-close{
-				width:27px;
-				height:27px;
+				width:31px;
+				height:31px;
 				border:none;
 				border-radius:6px;
 				background:rgba(255,255,255,.15);
@@ -873,8 +873,8 @@
 			.mfi-body{
 				display:flex;
 				flex-direction:column;
-				padding:12px 18px;
-				gap:6px;
+				padding:14px 21px;
+				gap:7px;
 			}
 
 			.mfi-loading, .mfi-vacio-msg{
@@ -907,19 +907,19 @@
 				flex-shrink:0;
 				display:grid;
 				grid-template-columns:repeat(4, 1fr);
-				gap:9px;
+				gap:10px;
 			}
 
 			.mfi-status-item{
 				background:white;
 				border:1px solid #e8edf3;
 				border-left:3px solid #cbd5e1;
-				border-radius:11px;
-				padding:8px 14px;
+				border-radius:13px;
+				padding:9px 16px;
 				display:flex;
 				align-items:center;
 				justify-content:space-between;
-				gap:9px;
+				gap:10px;
 				box-shadow:0 1px 3px rgba(15,23,42,.05);
 				transition:box-shadow .15s, transform .15s;
 			}
@@ -931,7 +931,7 @@
 			.mfi-status-item.mfi-pill-neutral-acc { border-left-color:#185FA5; }
 
 			.mfi-status-item .mfi-status-label{
-				font-size:9px;
+				font-size:10.5px;
 				font-weight:700;
 				color:#7b8794;
 				text-transform:uppercase;
@@ -952,7 +952,7 @@
 				display:grid;
 				grid-template-columns:2.7fr 1fr .95fr;
 				align-items:start;
-				gap:7px;
+				gap:8px;
 			}
 
 			/* Agrupa Identificación/Movimiento + AV en su propia mini-grid
@@ -965,17 +965,17 @@
 				display:grid;
 				grid-template-columns:1.7fr 1fr;
 				align-items:start;
-				gap:7px;
+				gap:8px;
 			}
 
 			.mfi-col{
 				background:white;
 				border:1px solid #e8edf3;
-				border-radius:11px;
-				padding:8px 12px;
+				border-radius:13px;
+				padding:9px 14px;
 				display:flex;
 				flex-direction:column;
-				gap:6px;
+				gap:7px;
 				justify-content:flex-start;
 				align-self:start;
 				box-shadow:0 1px 3px rgba(15,23,42,.05);
@@ -988,7 +988,7 @@
 			.mfi-col-grid{
 				display:grid;
 				grid-template-columns:1fr 1fr;
-				gap:6px 12px;
+				gap:7px 14px;
 			}
 
 			/* Tarjeta de Observaciones/Descripción: mismo ancho que
@@ -999,11 +999,11 @@
 			.mfi-side{
 				background:linear-gradient(165deg,#eaf2fb,#f4f8fd);
 				border:1.5px solid #cfe0f5;
-				border-radius:11px;
-				padding:8px 12px;
+				border-radius:13px;
+				padding:9px 14px;
 				display:flex;
 				flex-direction:column;
-				gap:4px;
+				gap:5px;
 				align-self:start;
 				box-shadow:0 4px 16px rgba(24,95,165,.1);
 			}
@@ -1018,13 +1018,13 @@
 			   dinero/fechas. Sin la caja, el panel mide lo mismo que sus
 			   vecinas y las franjas de abajo suben justo donde debían. */
 			.mfi-side .mfi-campo{
-				padding:2px 0;
+				padding:3px 0;
 				min-width:0;
 			}
 
 			.mfi-side .mfi-campo label{ color:#5b7fa6; margin-bottom:0; }
 
-			.mfi-side .mfi-campo .mfi-valor{ font-size:11.5px; font-weight:700; color:#0f4d8a; }
+			.mfi-side .mfi-campo .mfi-valor{ font-size:13.5px; font-weight:700; color:#0f4d8a; }
 
 			/* Ley + Cotiza lado a lado, dentro de la misma tarjeta de
 			   Campaña/Movilidad (ver renderFicha()) -- min-width:0 en
@@ -1034,14 +1034,14 @@
 			.mfi-side-grid{
 				display:grid;
 				grid-template-columns:1fr 1fr;
-				gap:7px;
+				gap:8px;
 			}
 
-			.mfi-side-grid .mfi-pill{ font-size:9.5px; padding:3px 9px; }
+			.mfi-side-grid .mfi-pill{ font-size:11px; padding:4px 10px; }
 
 			.mfi-campo label{
 				display:block;
-				font-size:8.5px;
+				font-size:10px;
 				font-weight:700;
 				color:#7b8794;
 				text-transform:uppercase;
@@ -1050,11 +1050,11 @@
 			}
 
 			.mfi-campo .mfi-valor{
-				font-size:11.5px;
+				font-size:13.5px;
 				font-weight:600;
 				color:#1f2d3d;
 				word-break:break-word;
-				line-height:1.25;
+				line-height:1.3;
 			}
 
 			.mfi-campo .mfi-valor.mfi-vacio{ color:#c3cbd6; font-weight:400; }
@@ -1065,10 +1065,10 @@
 			.mfi-pill{
 				display:inline-flex;
 				align-items:center;
-				gap:6px;
-				font-size:10.5px;
+				gap:7px;
+				font-size:12px;
 				font-weight:700;
-				padding:4px 12px;
+				padding:5px 14px;
 				border-radius:20px;
 				white-space:nowrap;
 			}
@@ -1094,25 +1094,25 @@
 				display:grid;
 				grid-auto-flow:column;
 				grid-auto-columns:1fr;
-				gap:7px;
+				gap:8px;
 			}
 
 			.mfi-strip .mfi-campo{
 				background:white;
 				border:1px solid #e8edf3;
-				border-radius:9px;
-				padding:6px 9px;
+				border-radius:10px;
+				padding:7px 10px;
 				box-shadow:0 1px 3px rgba(15,23,42,.05);
 				transition:box-shadow .15s, transform .15s;
 			}
 
 			.mfi-strip .mfi-campo:hover{ box-shadow:0 4px 14px rgba(15,23,42,.09); transform:translateY(-1px); }
 
-			.mfi-strip .mfi-campo label{ font-size:8px; margin-bottom:1px; }
-			.mfi-strip .mfi-campo .mfi-valor{ font-size:10.5px; }
+			.mfi-strip .mfi-campo label{ font-size:9.5px; margin-bottom:1px; }
+			.mfi-strip .mfi-campo .mfi-valor{ font-size:12.5px; }
 
 			.mfi-campo-money{ border-color:#dbe9fb; }
-			.mfi-campo-money .mfi-valor{ font-size:14px; font-weight:700; color:#185FA5; letter-spacing:-.01em; }
+			.mfi-campo-money .mfi-valor{ font-size:16.5px; font-weight:700; color:#185FA5; letter-spacing:-.01em; }
 			.mfi-campo-money.mfi-money-verde{ border-color:#cdeede; }
 			.mfi-campo-money.mfi-money-verde .mfi-valor{ color:#0F6E56; }
 
