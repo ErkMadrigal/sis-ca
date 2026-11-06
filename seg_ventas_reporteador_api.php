@@ -57,10 +57,36 @@ $raw    = file_get_contents('php://input');
 $input  = json_decode($raw, true);
 $action = $input['action'] ?? '';
 
+/* ── Caché del Reporteador (ver sv_cache_funciones.php) ── */
+if ($action === 'estadoCache') {
+    svCacheAsegurarTablas($conecta);
+    $e = svCacheEstado($conecta);
+    echo json_encode(['status' => 'ok', 'cache' => $e]);
+    exit;
+}
+
+if ($action === 'refrescarCache') {
+    $nombreC = $_SESSION['nombre'] ?? '';
+    if (nivelReporteador($conecta, utf8_decode($nombreC)) != 12) {
+        echo json_encode(['status' => 'error', 'message' => 'Solo un administrador puede actualizar la caché.']);
+        exit;
+    }
+    svCacheAsegurarTablas($conecta);
+    if (function_exists('fastcgi_finish_request')) {
+        /* En segundo plano: se contesta ya y el refresco corre después. */
+        svCacheProgramarRefresco($conecta, true);
+        echo json_encode(['status' => 'ok', 'message' => 'Actualización iniciada en segundo plano.', 'async' => true]);
+        exit;
+    }
+    $r = svCacheRefrescar($conecta);
+    echo json_encode(['status' => $r['ok'] ? 'ok' : 'error', 'message' => $r['msg'], 'async' => false]);
+    exit;
+}
+
 if ($action === 'generarReporte') {
 
     $nombre = $_SESSION['nombre'] ?? '';
-    $nivel  = nivel_usuario(utf8_decode($nombre));
+    $nivel  = nivelReporteador($conecta, utf8_decode($nombre));
 
     $query = "Select clave from empl_usuarios where nombre='" . mysqli_real_escape_string($conecta->conexion, utf8_decode($nombre)) . "'";
     $bd    = $conecta->consulta($query);
@@ -134,6 +160,7 @@ if ($action === 'generarReporte') {
         'nivel'    => $nivel,
         'clave'    => $clave,
         'nombre'   => $nombre,
+        'en_vivo'  => !empty($input['en_vivo']),
     ], 1000);
 
     if (!$resultado['ok']) {
@@ -170,6 +197,8 @@ if ($action === 'generarReporte') {
         'columnas' => $columnas,
         'data'     => $data,
         'limitado' => $resultado['limitado'],
+        'origen'   => $resultado['origen']   ?? 'vivo',
+        'cache_at' => $resultado['cache_at'] ?? '',
         /* Aunque el status sea "ok", puede venir con 0 filas por una razón
            puntual ("Sin resultados para estos filtros." o, si algo tronó
            en el armado del reporte, el error de SQL) -- se manda siempre
@@ -232,7 +261,7 @@ if ($action === 'buscarFiltro') {
        tiene bloqueado (ver filtrosPermitidosParaNivel arriba). Esto no
        depende de sesión de "generarReporte", así que se recalcula. */
     $nombreSesion = $_SESSION['nombre'] ?? '';
-    $nivelSesion  = nivel_usuario(utf8_decode($nombreSesion));
+    $nivelSesion  = nivelReporteador($conecta, utf8_decode($nombreSesion));
     if (!in_array($tipo, array_merge(['Folio'], filtrosPermitidosParaNivel($nivelSesion)), true)) {
         echo json_encode(['status' => 'error', 'message' => 'No tienes permiso para buscar por "' . $tipo . '".']);
         exit;
@@ -342,7 +371,7 @@ if ($action === 'buscarFiltro') {
 if (in_array($action, ['listarPermisosCampos', 'getPermisosUsuario', 'buscarUsuarioPermiso', 'otorgarPermisoCampo', 'revocarPermisoCampo'], true)) {
 
     $nombreSesion = $_SESSION['nombre'] ?? '';
-    $nivelSesion  = nivel_usuario(utf8_decode($nombreSesion));
+    $nivelSesion  = nivelReporteador($conecta, utf8_decode($nombreSesion));
 
     if ($nivelSesion != 12) {
         echo json_encode(['status' => 'error', 'message' => 'Solo un administrador puede administrar estos permisos.']);

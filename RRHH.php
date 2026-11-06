@@ -192,6 +192,22 @@
 
 			#btn-boletinados-top:hover { background: #b7791f; color: #fff; }
 
+			/* ── Botón Carga masiva (barra superior) ── */
+			#btn-carga-masiva-top {
+				background: #fff;
+				color: #2e7d32;
+				border: 1px solid #a5d6a7;
+				border-radius: 6px;
+				padding: 8px 14px;
+				font-size: 13px;
+				font-weight: 600;
+				cursor: pointer;
+				margin-left: 8px;
+				transition: background .2s, color .2s;
+			}
+
+			#btn-carga-masiva-top:hover { background: #2e7d32; color: #fff; }
+
 			/* ── Panel de formulario ── */
 			#panel-empleado {
 				display: none;
@@ -1414,6 +1430,9 @@
 			<!-- Boletinados Principal: acceso directo sin necesidad de buscar/crear un empleado -->
 			<button id="btn-boletinados-top" onclick="abrirBoletinados()" style="display:none;">📋 Boletinados Principal</button>
 
+			<!-- Carga masiva de empleados (xlsx): mismo permiso que "+ Nuevo empleado" -->
+			<button id="btn-carga-masiva-top" onclick="window.location.href='seg_carga_masiva_empleados.php'" style="display:none;">📤 Carga masiva</button>
+
 			<!-- Botón Permisos (solo Super Usuario) -->
 			<button id="btn-permisos-top" onclick="abrirModalPermisos()" style="display:none;">Permisos</button>
 		</div>
@@ -1421,6 +1440,7 @@
 		<!-- Nombre del empleado seleccionado, centrado en todo el ancho -->
 		<div id="emp-badge-wrap" style="display:none; padding:10px 14px 0; text-align:center;">
 			<span id="emp-badge-txt" style="font-weight:700; font-size:14px; color:#2B73B6;"></span>
+			<div id="emp-ln-banner" style="display:none;margin:6px auto 0;max-width:620px;padding:5px 12px;background:#c0392b;color:#fff;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:.03em;"></div>
 		</div>
 
 		<!-- Panel de edición / alta -->
@@ -1430,13 +1450,14 @@
 			<div class="nap-tabs">
 				<div class="nap-tab activa" data-pane="pane-datos">Usuario</div>
 				<div class="nap-tab" data-pane="pane-tab2">Datos generales</div>
+				<div class="nap-tab" data-pane="pane-tab5">Finanzas</div>
+				<div class="nap-tab" data-pane="pane-tab8">Información</div>
 				<div class="nap-tab" data-pane="pane-tab3">Datos bancarios</div>
 				<div class="nap-tab" data-pane="pane-tab4">Estruc empleados</div>
-				<div class="nap-tab" data-pane="pane-tab5">Finanzas</div>
 				<div class="nap-tab" data-pane="pane-tab6">Historial</div>
 				<div class="nap-tab" data-pane="pane-tab7">Contac. Emergencia</div>
-				<div class="nap-tab" data-pane="pane-tab8">Información</div>
 				<div class="nap-tab" data-pane="pane-tab10">Expediente Digital</div>
+				<div class="nap-tab" data-pane="pane-tarjetas">Tarjetas</div>
 				<div class="nap-tab" data-pane="pane-boletinados">Boletinados Principal</div>
 				<div class="nap-tab" data-pane="pane-tab9">Permisos</div>
 			</div>
@@ -1606,7 +1627,18 @@
 								<span id="lbl-espartano">No</span>
 							</div>
 						</div>
+						<div class="nap-col-fixed-200">
+							<div class="toggle-wrap" style="padding-top:0;">
+								<span class="toggle-label" style="color:#c0392b;">Lista negra:</span>
+								<label class="toggle-switch">
+									<input type="checkbox" id="dg-lista-negra" onchange="toggleListaNegra()">
+									<span class="toggle-slider"></span>
+								</label>
+								<span id="lbl-lista-negra">No</span>
+							</div>
+						</div>
 					</div>
+					<div id="dg-ln-aviso" style="display:none;margin:-4px 0 10px;padding:8px 12px;background:#fdeceb;border:1px solid #f1b8b3;border-radius:6px;color:#a52a1f;font-size:12.5px;"></div>
 
 					<!-- Jefe inmediato (solo visible si Staff = sí) -->
 					<div class="nap-row" id="dg-row-jefe" style="display:none;">
@@ -1738,6 +1770,25 @@
 					<!-- Footer propio de esta pestaña -->
 					<div class="nap-footer">
 						<button class="btn-guardar" onclick="guardarDatosGenerales()">Guardar datos generales</button>
+					</div>
+
+					<!-- Observaciones: solo hay UNA por clave -- al guardar se
+						 actualiza directo (sin historial, lo anterior no se conserva). -->
+					<div class="nap-seccion-titulo">Observaciones</div>
+					<div class="nap-row">
+						<div class="nap-col" style="width:100%;">
+							<textarea id="obs-texto" class="nap-input" rows="3" maxlength="500"
+									  placeholder="Observaciones del empleado..."
+									  oninput="actualizarContadorObs()"
+									  style="resize:vertical; width:100%; font-family:inherit; padding:8px;"></textarea>
+							<div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+								<span id="obs-meta" style="font-size:11px; color:#888;"></span>
+								<span id="obs-contador" style="font-size:11px; color:#888;">0 / 500</span>
+							</div>
+						</div>
+					</div>
+					<div class="nap-row" style="justify-content:flex-end;">
+						<button type="button" class="btn-guardar" onclick="guardarObservacion()">Guardar observación</button>
 					</div>
 
 				</div>
@@ -2184,6 +2235,22 @@
 							<div id="info-folios-ok" style="display:none;font-size:13px;font-weight:700;color:#1e8e58;margin-top:6px;">✓ Sin folios por cobrar</div>
 						</div>
 
+						<!-- Afore Móvil: registros aceptados, sin cobrar, cliente <60 años y
+							 capturados/enviados dentro de la ventana de 8 días -->
+						<div id="info-card-afore-movil"
+							onclick="abrirModalAforeMovil()"
+							style="cursor:pointer; background:#fff3e0;border:1px solid #ffd9a8;border-left:4px solid #e0932b;border-radius:8px;padding:16px 18px;transition:box-shadow .15s;"
+							onmouseenter="this.style.boxShadow='0 4px 12px rgba(224,147,43,.2)'"
+							onmouseleave="this.style.boxShadow='none'">
+							<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#b06c00;margin-bottom:6px;">Afore Móvil pendientes por cobrar</div>
+							<span style="font-size:28px;font-weight:700;color:#b06c00;" id="info-afore-movil-num">0</span>
+							<div id="info-afore-movil-ok" style="display:none;font-size:13px;font-weight:700;color:#1e8e58;margin-top:6px;">✓ Nada pendiente</div>
+						</div>
+
+					</div>
+
+					<div style="margin-top:18px;text-align:right;">
+						<a href="javascript:void(0)" onclick="abrirModalBaja()" style="font-size:12.5px;font-weight:600;color:#c0392b;text-decoration:underline;">Dar de baja al empleado</a>
 					</div>
 
 					<div id="info-loading" style="text-align:center;padding:30px;color:#aaa;font-size:13px;">
@@ -2243,6 +2310,71 @@
 			</div>
 			<!-- /pane-tab10 -->
 
+			<!-- ── Pestaña: Tarjetas (carobra_2014.empleados_tarjetas, ligada por clave) ── -->
+			<div class="nap-pane" id="pane-tarjetas">
+
+				<div id="tar-sin-empleado" style="display:block;">
+					<div class="pane-placeholder">
+						<svg width="48" height="48" fill="none" stroke="#888" stroke-width="1.5" viewBox="0 0 24 24">
+							<rect x="2" y="5" width="20" height="14" rx="2"/>
+							<line x1="2" y1="10" x2="22" y2="10"/>
+						</svg>
+						Selecciona un empleado para capturar su tarjeta.
+					</div>
+				</div>
+
+				<div id="tar-contenido" style="display:none;">
+
+					<div class="nap-seccion-titulo">Tarjeta</div>
+
+					<div class="nap-row">
+						<div class="nap-col">
+							<label class="nap-label">Producto base</label>
+							<select id="tar-producto" class="nap-input">
+								<option value="">— Selecciona —</option>
+								<option value="Bradescard">Bradescard</option>
+								<option value="Sears">Sears</option>
+								<option value="Falabella">Falabella</option>
+								<option value="Registros">Registros</option>
+							</select>
+						</div>
+						<div class="nap-col">
+							<label class="nap-label">Banco</label>
+							<input type="text" id="tar-banco" class="nap-input" maxlength="100" placeholder="Banco del producto">
+						</div>
+						<div class="nap-col">
+							<label class="nap-label">Nivel</label>
+							<input type="text" id="tar-nivel" class="nap-input" readonly placeholder="—">
+						</div>
+					</div>
+
+					<div class="nap-row">
+						<div class="nap-col">
+							<label class="nap-label">Usuario Soc <span style="color:#aaa;font-weight:400;font-size:11px;">(solo números, máx. 9)</span></label>
+							<input type="text" id="tar-soc" class="nap-input" maxlength="9" inputmode="numeric" placeholder="000000000"
+								   style="font-family:monospace;letter-spacing:1px;" oninput="this.value=this.value.replace(/\D/g,'')">
+						</div>
+						<div class="nap-col">
+							<label class="nap-label">Usuario Bid <span style="color:#aaa;font-weight:400;font-size:11px;">(solo números, máx. 9)</span></label>
+							<input type="text" id="tar-bid" class="nap-input" maxlength="9" inputmode="numeric" placeholder="000000000"
+								   style="font-family:monospace;letter-spacing:1px;" oninput="this.value=this.value.replace(/\D/g,'')">
+						</div>
+						<div class="nap-col" style="display:flex;align-items:flex-end;">
+							<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#444;cursor:pointer;padding-bottom:9px;">
+								<input type="checkbox" id="tar-sueldo" style="width:16px;height:16px;"> Tiene sueldo
+							</label>
+						</div>
+					</div>
+
+					<div style="display:flex;align-items:center;gap:12px;margin-top:10px;">
+						<button type="button" class="btn-guardar" onclick="guardarTarjeta()">Guardar tarjeta</button>
+						<span id="tar-meta" style="font-size:11px;color:#999;"></span>
+					</div>
+
+				</div>
+			</div>
+			<!-- /pane-tarjetas -->
+
 			<!-- ── Pestaña: Boletinados Principal ──
 			     A diferencia de las demás pestañas de este panel, NO
 			     depende de tener un empleado cargado -- es un registro
@@ -2272,6 +2404,18 @@
 						<input type="text" id="bol-apellido-materno" class="nap-input" placeholder="Ej: TORRES">
 					</div>
 				</div>
+				<div class="nap-row">
+					<div class="nap-col" style="width:100%;">
+						<label class="nap-label">Observaciones</label>
+						<textarea id="bol-observaciones" class="nap-input" rows="2" maxlength="500"
+								  placeholder="Motivo del boletín, notas..."
+								  oninput="actualizarContadorBolObs()"
+								  style="resize:vertical; width:100%; font-family:inherit; padding:8px;"></textarea>
+						<div style="text-align:right; margin-top:2px;">
+							<span id="bol-obs-contador" style="font-size:11px; color:#888;">0 / 500</span>
+						</div>
+					</div>
+				</div>
 				<div class="nap-row" style="justify-content:flex-end;">
 					<button type="button" class="btn-guardar" onclick="guardarBoletinado()">+ Agregar a la lista</button>
 				</div>
@@ -2289,13 +2433,14 @@
 							<th>Nombre(s)</th>
 							<th>Apellido paterno</th>
 							<th>Apellido materno</th>
+							<th>Observaciones</th>
 							<th>Capturado por</th>
 							<th>Fecha</th>
 							<th></th>
 						</tr>
 					</thead>
 					<tbody id="bol-tbody">
-						<tr><td colspan="6" class="bnc-vacio">Cargando...</td></tr>
+						<tr><td colspan="7" class="bnc-vacio">Cargando...</td></tr>
 					</tbody>
 				</table>
 
@@ -2595,6 +2740,70 @@
 		</div>
 	</div>
 
+	<!-- ══ MODAL: Dar de baja ══ -->
+	<div id="modal-baja-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:99999;justify-content:center;align-items:center;padding:1.5rem;backdrop-filter:blur(4px);">
+		<div style="width:100%;max-width:480px;max-height:90vh;background:#fff;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+
+			<div style="padding:18px 22px 14px;border-bottom:1px solid #e8e8e8;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#fdeeee,#fff);">
+				<div>
+					<h4 style="margin:0;font-size:15px;font-weight:700;color:#c0392b;">Dar de baja</h4>
+					<div id="modal-baja-subtitulo" style="font-size:12px;color:#aaa;margin-top:2px;"></div>
+				</div>
+				<button onclick="cerrarModalBaja()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;line-height:1;">✕</button>
+			</div>
+
+			<div style="flex:1;overflow-y:auto;padding:18px 22px;">
+				<div id="modal-baja-loading" style="text-align:center;padding:40px;color:#aaa;font-size:13px;"><span class="spinner-bnc"></span> Cargando...</div>
+
+				<div id="modal-baja-form" style="display:none;">
+
+					<div style="margin-bottom:14px;">
+						<label style="display:block;font-size:12px;font-weight:600;color:#555;margin-bottom:4px;">Observación <span style="color:#c0392b;">*</span></label>
+						<textarea id="baja-observacion" maxlength="500" rows="3" oninput="document.getElementById('baja-obs-count').textContent=this.value.length"
+							style="width:100%;box-sizing:border-box;border:1px solid #d0d0d0;border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit;resize:vertical;outline:none;"
+							placeholder="Motivo de la baja..."></textarea>
+						<div style="text-align:right;font-size:11px;color:#aaa;"><span id="baja-obs-count">0</span> / 500</div>
+					</div>
+
+					<div style="margin-bottom:14px;">
+						<label style="display:block;font-size:12px;font-weight:600;color:#555;margin-bottom:4px;">Fecha de baja</label>
+						<input type="date" id="baja-fecha" oninput="onBajaFechaInput()"
+							style="width:100%;box-sizing:border-box;border:1px solid #d0d0d0;border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit;outline:none;" />
+					</div>
+
+					<div style="display:flex;align-items:center;justify-content:space-between;background:#f8fafc;border:1px solid #e8e8e8;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+						<div>
+							<div style="font-size:12px;font-weight:600;color:#555;">Activo</div>
+							<div id="baja-activo-hint" style="font-size:11px;color:#aaa;"></div>
+						</div>
+						<label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;cursor:pointer;">
+							<input type="checkbox" id="baja-activo" onchange="onBajaActivoChange()" style="opacity:0;width:0;height:0;" />
+							<span id="baja-activo-track" style="position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.2s;"></span>
+							<span id="baja-activo-knob" style="position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s;"></span>
+						</label>
+					</div>
+
+					<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+						<div style="background:#f8fafc;border:1px solid #e8e8e8;border-radius:8px;padding:10px 14px;">
+							<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:4px;">Asesoría Bernal</div>
+							<div id="baja-bernal" style="font-size:14px;font-weight:700;color:#1a1a2e;">—</div>
+						</div>
+						<div style="background:#f8fafc;border:1px solid #e8e8e8;border-radius:8px;padding:10px 14px;">
+							<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:4px;">NAP</div>
+							<div id="baja-nap" style="font-size:14px;font-weight:700;color:#1a1a2e;">—</div>
+						</div>
+					</div>
+
+				</div>
+			</div>
+
+			<div style="padding:12px 22px;border-top:1px solid #e8e8e8;background:#fafafa;display:flex;justify-content:flex-end;gap:10px;">
+				<button onclick="cerrarModalBaja()" style="background:#f1f5f9;color:#64748b;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Cancelar</button>
+				<button id="baja-btn-guardar" onclick="guardarBaja()" style="background:#c0392b;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Guardar</button>
+			</div>
+		</div>
+	</div>
+
 	<!-- ══ MODAL: Folios de producción (todos los que le pertenecen) ══ -->
 	<div id="modal-folios-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:99999;justify-content:center;align-items:center;padding:1.5rem;backdrop-filter:blur(4px);">
 		<div style="width:100%;max-width:780px;max-height:88vh;background:#fff;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
@@ -2822,13 +3031,14 @@
 	const PESTANAS_INFO = [
 		{ key: 'usuario',              pane: 'pane-datos', label: 'Usuario' },
 		{ key: 'datos_generales',      pane: 'pane-tab2',  label: 'Datos generales' },
+		{ key: 'finanzas',             pane: 'pane-tab5',  label: 'Finanzas' },
+		{ key: 'info',                 pane: 'pane-tab8',  label: 'Información' },
 		{ key: 'datos_bancarios',      pane: 'pane-tab3',  label: 'Datos bancarios' },
 		{ key: 'estructura',           pane: 'pane-tab4',  label: 'Estruc empleados' },
-		{ key: 'finanzas',             pane: 'pane-tab5',  label: 'Finanzas' },
 		{ key: 'historial',            pane: 'pane-tab6',  label: 'Historial' },
 		{ key: 'contactos_emergencia', pane: 'pane-tab7',  label: 'Contac. Emergencia' },
-		{ key: 'info',                 pane: 'pane-tab8',  label: 'Información' },
 		{ key: 'expediente_digital',   pane: 'pane-tab10', label: 'Expediente Digital' },
+		{ key: 'tarjetas',             pane: 'pane-tarjetas', label: 'Tarjetas' },
 		{ key: 'boletinados',          pane: 'pane-boletinados', label: 'Boletinados Principal' },
 		{ key: 'permisos',             pane: 'pane-tab9',  label: 'Permisos' },
 	];
@@ -2856,6 +3066,17 @@
 		if (btnNuevoEmp) {
 			const puedeVerUsuario = esSuper || permitidas.indexOf('usuario') !== -1;
 			btnNuevoEmp.style.display = puedeVerUsuario ? '' : 'none';
+		}
+
+		// Botón "📤 Carga masiva": OCULTO POR AHORA a propósito (se sigue
+		// entrando a seg_carga_masiva_empleados.php directo por URL
+		// mientras tanto). Para volver a mostrarlo, regresa esta línea a
+		// la lógica de permiso de antes (comentada abajo).
+		const btnCargaMasiva = document.getElementById('btn-carga-masiva-top');
+		if (btnCargaMasiva) {
+			btnCargaMasiva.style.display = 'none';
+			// const puedeCargaMasiva = esSuper || permitidas.indexOf('usuario') !== -1;
+			// btnCargaMasiva.style.display = puedeCargaMasiva ? '' : 'none';
 		}
 
 		// Botón "📋 Boletinados Principal": mismo permiso que su pestaña.
@@ -3666,6 +3887,105 @@
 		tabla.style.display = 'table';
 	}
 
+	/* ════════════════════════════════════════
+	MODAL: Dar de baja (pestaña Información)
+	════════════════════════════════════════ */
+	function pintarSwitchBaja() {
+		const on = document.getElementById('baja-activo').checked;
+		document.getElementById('baja-activo-track').style.background = on ? '#1e8e58' : '#ccc';
+		document.getElementById('baja-activo-knob').style.left        = on ? '23px' : '3px';
+		document.getElementById('baja-activo-hint').textContent =
+			on ? 'El usuario seguirá activo' : 'El usuario quedará inactivo (activo = 0)';
+	}
+
+	function onBajaActivoChange() { pintarSwitchBaja(); }
+
+	/* Al capturar una fecha de baja se apaga el switch Activo (se puede volver a prender a mano) */
+	function onBajaFechaInput() {
+		if (document.getElementById('baja-fecha').value) {
+			document.getElementById('baja-activo').checked = false;
+			pintarSwitchBaja();
+		}
+	}
+
+	function cerrarModalBaja() {
+		document.getElementById('modal-baja-overlay').style.display = 'none';
+	}
+
+	async function abrirModalBaja() {
+		if (!infoClaveActual) return;
+
+		document.getElementById('modal-baja-overlay').style.display = 'flex';
+		document.getElementById('modal-baja-subtitulo').textContent = infoClaveActual;
+		document.getElementById('modal-baja-loading').style.display = 'block';
+		document.getElementById('modal-baja-form').style.display    = 'none';
+
+		try {
+			const resp = await api({ action: 'getDatosBaja', clave: infoClaveActual });
+			document.getElementById('modal-baja-loading').style.display = 'none';
+
+			if (!resp.ok) {
+				cerrarModalBaja();
+				Swal.fire({ icon:'error', title:'Error', text: resp.msg || 'No se pudieron cargar los datos.', confirmButtonColor:'#2B73B6' });
+				return;
+			}
+
+			const d = resp.datos;
+			document.getElementById('baja-observacion').value = d.observaciones || '';
+			document.getElementById('baja-obs-count').textContent = (d.observaciones || '').length;
+			document.getElementById('baja-fecha').value       = d.fec_baja || '';
+			document.getElementById('baja-activo').checked    = parseInt(d.activo) === 1;
+			document.getElementById('baja-bernal').textContent = parseInt(d.ase_bernal) === 1 ? 'Sí' : 'No';
+			document.getElementById('baja-nap').textContent    = d.nap || '—';
+			pintarSwitchBaja();
+			document.getElementById('modal-baja-form').style.display = 'block';
+
+		} catch (e) {
+			document.getElementById('modal-baja-loading').style.display = 'none';
+			cerrarModalBaja();
+			Swal.fire({ icon:'error', title:'Error de conexión', confirmButtonColor:'#2B73B6' });
+		}
+	}
+
+	async function guardarBaja() {
+		const observaciones = document.getElementById('baja-observacion').value.trim();
+		const fecBaja       = document.getElementById('baja-fecha').value;
+		const activo        = document.getElementById('baja-activo').checked ? 1 : 0;
+
+		if (!observaciones) {
+			Swal.fire({ icon:'warning', title:'Campo requerido', text:'Captura la observación (motivo de la baja).', confirmButtonColor:'#2B73B6' });
+			return;
+		}
+		if (activo === 0 && !fecBaja) {
+			Swal.fire({ icon:'warning', title:'Campo requerido', text:'Captura la fecha de baja.', confirmButtonColor:'#2B73B6' });
+			return;
+		}
+
+		const btn = document.getElementById('baja-btn-guardar');
+		btn.disabled = true; btn.textContent = 'Guardando...';
+
+		try {
+			const resp = await api({
+				action: 'guardarBaja', clave: infoClaveActual,
+				observaciones, fec_baja: fecBaja, activo
+			});
+			btn.disabled = false; btn.textContent = 'Guardar';
+
+			if (!resp.ok) {
+				Swal.fire({ icon:'error', title:'Error', text: resp.msg || 'No se pudo guardar.', confirmButtonColor:'#2B73B6' });
+				return;
+			}
+
+			cerrarModalBaja();
+			Swal.fire({ icon:'success', title:'Listo', text: resp.msg, timer:1800, showConfirmButton:false });
+			cargarInfoEmpleado(infoClaveActual);
+
+		} catch (e) {
+			btn.disabled = false; btn.textContent = 'Guardar';
+			Swal.fire({ icon:'error', title:'Error de conexión', confirmButtonColor:'#2B73B6' });
+		}
+	}
+
 	async function abrirModalFolios() {
 		if (!infoClaveActual) return;
 
@@ -3707,6 +4027,71 @@
 			document.getElementById('modal-fol-loading').style.display = 'none';
 			document.getElementById('modal-fol-vacio').textContent = 'Error al cargar los folios.';
 			document.getElementById('modal-fol-vacio').style.display = 'block';
+		}
+	}
+
+	/* ════════════════════════════════════════
+	MODAL: Afore Móvil pendientes por cobrar
+	Se usa SweetAlert con una tabla en vez del sistema de overlays
+	propio de Folios/Acompañamiento -- es una sola tabla de solo
+	lectura, no hace falta duplicar todo ese andamiaje.
+	════════════════════════════════════════ */
+	async function abrirModalAforeMovil() {
+		if (!infoClaveActual) return;
+
+		Swal.fire({
+			icon: 'info',
+			title: 'Afore Móvil pendientes por cobrar',
+			html: '<div style="text-align:center;padding:20px;color:#888;">Cargando...</div>',
+			showConfirmButton: true,
+			confirmButtonText: 'Cerrar',
+			confirmButtonColor: '#e0932b',
+			width: 720,
+		});
+
+		try {
+			const resp = await api({ action: 'getAforeMovilDetalle', clave: infoClaveActual });
+			const registros = (resp.ok ? resp.registros : []) || [];
+
+			if (!registros.length) {
+				Swal.update({
+					html: '<div style="text-align:center;padding:20px;color:#888;">' +
+						(resp.ok ? 'Sin registros pendientes por cobrar.' : (resp.msg || 'Error al cargar.')) +
+						'</div>'
+				});
+				return;
+			}
+
+			const filas = registros.map(r => `
+				<tr style="border-bottom:1px solid #f0f0f0;">
+					<td style="padding:7px 8px;font-weight:600;">${escaparHtml(r.folio || '')}</td>
+					<td style="padding:7px 8px;text-align:left;">${escaparHtml(r.cliente || '')}</td>
+					<td style="padding:7px 8px;">${r.edad ?? ''}</td>
+					<td style="padding:7px 8px;">${escaparHtml(r.fec_captura || '')}</td>
+					<td style="padding:7px 8px;">${escaparHtml(r.fec_envio || '')}</td>
+					<td style="padding:7px 8px;">${(r.monto || 0).toLocaleString('es-MX',{style:'currency',currency:'MXN'})}</td>
+				</tr>`).join('');
+
+			Swal.update({
+				html: `
+					<div style="max-height:60vh; overflow:auto; margin-top:8px;">
+						<table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+							<thead>
+								<tr style="background:#fff3e0; color:#b06c00; text-align:center;">
+									<th style="padding:7px 8px;">Folio</th>
+									<th style="padding:7px 8px;text-align:left;">Cliente</th>
+									<th style="padding:7px 8px;">Edad</th>
+									<th style="padding:7px 8px;">Captura</th>
+									<th style="padding:7px 8px;">Envío</th>
+									<th style="padding:7px 8px;">Monto</th>
+								</tr>
+							</thead>
+							<tbody>${filas}</tbody>
+						</table>
+					</div>`
+			});
+		} catch (e) {
+			Swal.update({ html: '<div style="text-align:center;padding:20px;color:#c0392b;">Error de comunicación con el servidor.</div>' });
 		}
 	}
 
@@ -4078,6 +4463,8 @@
 		inpBusq.value = '';
 		document.getElementById('emp-badge-wrap').style.display = 'none';
 		document.getElementById('emp-badge-txt').textContent = '';
+		document.getElementById('emp-badge-txt').style.color = '#2B73B6';
+		document.getElementById('emp-ln-banner').style.display = 'none';
 		cerrarPanel();
 	}
 
@@ -4121,6 +4508,7 @@
 		document.getElementById('dg-form').style.display = 'block';
 		document.getElementById('dg-clave').value = emp.clave || '';
 		cargarDatosGenerales(emp.clave);
+		cargarObservaciones(emp.clave);
 
 		/* Habilitar y cargar pestaña Datos bancarios */
 		document.getElementById('bnc-sin-empleado').style.display = 'none';
@@ -4155,6 +4543,11 @@
 		document.getElementById('exd-sin-empleado').style.display = 'none';
 		document.getElementById('exd-contenido').style.display = 'block';
 		cargarExpedienteDigital(emp.clave);
+
+		/* Habilitar y cargar pestaña Tarjetas */
+		document.getElementById('tar-sin-empleado').style.display = 'none';
+		document.getElementById('tar-contenido').style.display = 'block';
+		cargarTarjeta(emp.clave);
 
 		/* Habilitar y cargar la sección individual de la pestaña Permisos
 		   (la sección de lote por nivel no depende de tener un empleado
@@ -4251,6 +4644,10 @@
 		document.getElementById('info-contenido').style.display = 'none';
 
 		/* Pestaña Expediente Digital deshabilitada hasta guardar el alta */
+		document.getElementById('tar-sin-empleado').style.display = 'block';
+		document.getElementById('tar-contenido').style.display = 'none';
+		tarClaveActual = '';
+
 		document.getElementById('exd-sin-empleado').style.display = 'block';
 		document.getElementById('exd-contenido').style.display = 'none';
 		document.getElementById('exd-lista').innerHTML = '';
@@ -4284,6 +4681,9 @@
 			document.getElementById('dg-fec-reingreso').value  = d.fec_reingreso  || '';
 			document.getElementById('dg-fec-baja').value       = d.fec_baja       || '';
 			document.getElementById('dg-staff').checked        = d.staff == 1;
+			document.getElementById('dg-lista-negra').checked  = d.lista_negra == 1;
+			listaNegraComentario = d.lista_negra_comentario || '';
+			pintarListaNegra(d.lista_negra == 1, listaNegraComentario);
 			document.getElementById('dg-espartano').checked    = d.espartano == 1;
 			document.getElementById('lbl-espartano').textContent = (d.espartano == 1) ? 'Sí' : 'No';
 			document.getElementById('dg-jefe-clave').value     = d.jefe_inmediato || '';
@@ -4314,6 +4714,63 @@
 			}
 		} catch (e) {
 			console.error('Error cargando datos generales:', e);
+		}
+	}
+
+	/* ════════════════════════════════════════
+	   Observaciones (dentro de Datos generales) — cargar / guardar
+	   Solo hay UNA observación por clave: al guardar se actualiza
+	   directo esa misma fila (sin historial, ver guardarObservacion()
+	   del backend).
+	════════════════════════════════════════ */
+	async function cargarObservaciones(clave) {
+		document.getElementById('obs-texto').value = '';
+		document.getElementById('obs-meta').textContent = '';
+		actualizarContadorObs();
+
+		try {
+			const resp = await api({ action: 'getObservacion', clave });
+			if (!resp.ok) return;
+
+			if (resp.actual) {
+				document.getElementById('obs-texto').value = resp.actual.observaciones || '';
+				document.getElementById('obs-meta').textContent =
+					(resp.actual.usuario_captura || '—') + ' · ' + (resp.actual.fecha_captura || '');
+			}
+			actualizarContadorObs();
+		} catch (e) {
+			console.error('Error cargando observaciones:', e);
+		}
+	}
+
+	function actualizarContadorObs() {
+		const len = document.getElementById('obs-texto').value.length;
+		document.getElementById('obs-contador').textContent = len + ' / 500';
+	}
+
+	async function guardarObservacion() {
+		const clave = document.getElementById('dg-clave').value;
+		if (!clave) return;
+
+		const texto = document.getElementById('obs-texto').value.trim();
+		if (!texto) {
+			Swal.fire('Falta información', 'Escribe una observación antes de guardar.', 'warning');
+			return;
+		}
+
+		mostrarLoader();
+		try {
+			const resp = await api({ action: 'guardarObservacion', clave, observaciones: texto });
+			ocultarLoader();
+			if (resp.ok) {
+				Swal.fire({ icon:'success', title:'Guardado', text:'Observación guardada.', timer:1800, showConfirmButton:false });
+				cargarObservaciones(clave);
+			} else {
+				Swal.fire('Error', resp.msg || 'No se pudo guardar.', 'error');
+			}
+		} catch (e) {
+			ocultarLoader();
+			Swal.fire('Error', 'Error de comunicación con el servidor.', 'error');
 		}
 	}
 
@@ -4399,6 +4856,48 @@
 		}
 	}
 
+	/* ── Lista negra ── */
+	let listaNegraComentario = '';
+
+	function pintarListaNegra(activa, comentario) {
+		const txt    = document.getElementById('emp-badge-txt');
+		const banner = document.getElementById('emp-ln-banner');
+		const aviso  = document.getElementById('dg-ln-aviso');
+		document.getElementById('lbl-lista-negra').textContent = activa ? 'Sí' : 'No';
+		if (txt) txt.style.color = activa ? '#c0392b' : '#2B73B6';
+		if (banner) {
+			banner.style.display = activa ? 'block' : 'none';
+			banner.textContent   = activa ? ('⛔ LISTA NEGRA' + (comentario ? ' — ' + comentario : '')) : '';
+		}
+		if (aviso) {
+			aviso.style.display = activa ? 'block' : 'none';
+			aviso.textContent   = activa ? ('Comentario: ' + (comentario || '(sin comentario)')) : '';
+		}
+	}
+
+	async function toggleListaNegra() {
+		const chk    = document.getElementById('dg-lista-negra');
+		const activo = chk.checked;
+		if (activo) {
+			const r = await Swal.fire({
+				title: 'Agregar a lista negra',
+				text: 'El comentario es obligatorio y quedará como la observación del empleado (sustituye a la actual).',
+				input: 'textarea',
+				inputValue: (document.getElementById('obs-texto').value || '').trim(),
+				inputAttributes: { maxlength: 500, placeholder: 'Motivo...' },
+				showCancelButton: true,
+				confirmButtonText: 'Aceptar',
+				cancelButtonText: 'Cancelar',
+				inputValidator: v => (!v || !v.trim()) ? 'Escribe un comentario' : null
+			});
+			if (!r.isConfirmed) { chk.checked = false; return; }
+			listaNegraComentario = r.value.trim();
+		} else {
+			listaNegraComentario = '';
+		}
+		pintarListaNegra(activo, listaNegraComentario);   // vista previa; se guarda con el botón Guardar
+	}
+
 	function toggleEspartano() {
 		const activo = document.getElementById('dg-espartano').checked;
 		document.getElementById('lbl-espartano').textContent = activo ? 'Sí' : 'No';
@@ -4416,6 +4915,10 @@
 		document.getElementById('info-card-facturas').style.borderLeftColor = '#e0a800';
 		document.getElementById('info-card-acomp-cobrar').style.display = 'none';
 		document.getElementById('info-card-acomp-pagar').style.display  = 'none';
+		document.getElementById('info-afore-movil-num').style.display = 'block';
+		document.getElementById('info-afore-movil-ok').style.display  = 'none';
+		document.getElementById('info-card-afore-movil').style.background      = '#fff3e0';
+		document.getElementById('info-card-afore-movil').style.borderLeftColor = '#e0932b';
 
 		try {
 			infoClaveActual = clave;
@@ -4514,6 +5017,20 @@
 				document.getElementById('info-folios-ok').style.display  = 'block';
 				document.getElementById('info-card-folios').style.background      = '#eafaf1';
 				document.getElementById('info-card-folios').style.borderLeftColor = '#1e8e58';
+			}
+
+			const numAforeMovil = resp.afore_movil_pendientes || 0;
+			document.getElementById('info-afore-movil-num').textContent = numAforeMovil;
+			if (numAforeMovil > 0) {
+				document.getElementById('info-afore-movil-num').style.display = 'block';
+				document.getElementById('info-afore-movil-ok').style.display  = 'none';
+				document.getElementById('info-card-afore-movil').style.background      = '#fff3e0';
+				document.getElementById('info-card-afore-movil').style.borderLeftColor = '#e0932b';
+			} else {
+				document.getElementById('info-afore-movil-num').style.display = 'none';
+				document.getElementById('info-afore-movil-ok').style.display  = 'block';
+				document.getElementById('info-card-afore-movil').style.background      = '#eafaf1';
+				document.getElementById('info-card-afore-movil').style.borderLeftColor = '#1e8e58';
 			}
 
 		} catch (e) {
@@ -4783,6 +5300,8 @@
 			fec_baja       : document.getElementById('dg-fec-baja').value,
 			staff          : document.getElementById('dg-staff').checked ? 1 : 0,
 			espartano      : document.getElementById('dg-espartano').checked ? 1 : 0,
+			lista_negra    : document.getElementById('dg-lista-negra').checked ? 1 : 0,
+			lista_negra_comentario : listaNegraComentario,
 			jefe_inmediato : document.getElementById('dg-jefe-clave').value,
 			cp             : document.getElementById('dg-cp').value.trim(),
 			colonia        : document.getElementById('dg-colonia').value.trim(),
@@ -4804,6 +5323,8 @@
 			const resp = await api(payload);
 			ocultarLoader();
 			if (resp.ok) {
+				pintarListaNegra(payload.lista_negra == 1, listaNegraComentario);
+				if (payload.lista_negra == 1 && listaNegraComentario) cargarObservaciones(clave);   // refresca la sección Observaciones
 				Swal.fire({ icon:'success', title:'Guardado', text:'Datos generales actualizados.', timer:1800, showConfirmButton:false });
 			} else {
 				Swal.fire('Error', resp.msg || 'No se pudo guardar.', 'error');
@@ -5008,6 +5529,67 @@
 		document.getElementById('inp-busqueda').value           = '';
 		document.getElementById('emp-badge-wrap').style.display = 'none';
 		document.getElementById('emp-badge-txt').textContent    = '';
+		document.getElementById('emp-badge-txt').style.color    = '#2B73B6';
+		document.getElementById('emp-ln-banner').style.display  = 'none';
+	}
+
+	/* ════════════════════════════════════════
+	   TARJETAS (carobra_2014.empleados_tarjetas)
+	════════════════════════════════════════ */
+	let tarClaveActual = '';
+
+	async function cargarTarjeta(clave) {
+		tarClaveActual = clave;
+		['tar-producto', 'tar-banco', 'tar-soc', 'tar-bid'].forEach(id => { document.getElementById(id).value = ''; });
+		document.getElementById('tar-sueldo').checked = false;
+		document.getElementById('tar-nivel').value = '';
+		document.getElementById('tar-meta').textContent = '';
+		try {
+			const resp = await api({ action: 'getTarjeta', clave });
+			if (clave !== tarClaveActual) return;           // el usuario ya cambió de empleado
+			if (!resp.ok) { Swal.fire({ icon: 'error', title: 'Error', text: resp.msg || 'No se pudo cargar la tarjeta.' }); return; }
+			const n = resp.nivel || {};
+			document.getElementById('tar-nivel').value = n.id_nivel ? (n.nivel ? n.nivel + ' (' + n.id_nivel + ')' : String(n.id_nivel)) : 'Sin nivel asignado';
+			if (resp.existe && resp.data) {
+				const d = resp.data;
+				document.getElementById('tar-producto').value = d.producto_base || '';
+				document.getElementById('tar-banco').value    = d.banco || '';
+				document.getElementById('tar-soc').value      = d.usuario_soc || '';
+				document.getElementById('tar-bid').value      = d.usuario_bid || '';
+				document.getElementById('tar-sueldo').checked = !!d.tiene_sueldo;
+				if (d.fecha_mod) document.getElementById('tar-meta').textContent = 'Última modificación: ' + d.fecha_mod + (d.usuario_mod ? ' · ' + d.usuario_mod : '');
+			}
+		} catch (e) {
+			console.error('Error cargando tarjeta:', e);
+		}
+	}
+
+	async function guardarTarjeta() {
+		if (!tarClaveActual) return;
+		const producto = document.getElementById('tar-producto').value;
+		if (!producto) { Swal.fire({ icon: 'warning', title: 'Falta el producto base', text: 'Selecciona un producto base.' }); return; }
+		mostrarLoader();
+		try {
+			const resp = await api({
+				action        : 'guardarTarjeta',
+				clave         : tarClaveActual,
+				producto_base : producto,
+				banco         : document.getElementById('tar-banco').value.trim(),
+				tiene_sueldo  : document.getElementById('tar-sueldo').checked ? 1 : 0,
+				usuario_soc   : document.getElementById('tar-soc').value.trim(),
+				usuario_bid   : document.getElementById('tar-bid').value.trim()
+			});
+			ocultarLoader();
+			if (resp.ok) {
+				Swal.fire({ icon: 'success', title: 'Guardado', text: resp.msg, timer: 1500, showConfirmButton: false });
+				cargarTarjeta(tarClaveActual);
+			} else {
+				Swal.fire({ icon: 'error', title: 'No se pudo guardar', text: resp.msg || '' });
+			}
+		} catch (e) {
+			ocultarLoader();
+			Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudo guardar la tarjeta.' });
+		}
 	}
 
 	/* ════════════════════════════════════════
@@ -5027,18 +5609,18 @@
 
 	async function cargarBoletinados() {
 		const tbody = document.getElementById('bol-tbody');
-		tbody.innerHTML = '<tr><td colspan="6" class="bnc-vacio">Cargando...</td></tr>';
+		tbody.innerHTML = '<tr><td colspan="7" class="bnc-vacio">Cargando...</td></tr>';
 		try {
 			const resp = await api({ action: 'listarBoletinados' });
 			if (!resp.ok) {
-				tbody.innerHTML = '<tr><td colspan="6" class="bnc-vacio">' + (resp.msg || 'Error al cargar.') + '</td></tr>';
+				tbody.innerHTML = '<tr><td colspan="7" class="bnc-vacio">' + (resp.msg || 'Error al cargar.') + '</td></tr>';
 				return;
 			}
 			boletinadosCache   = resp.data || [];
 			boletinadosCargados = true;
 			renderTablaBoletinados(boletinadosCache);
 		} catch (e) {
-			tbody.innerHTML = '<tr><td colspan="6" class="bnc-vacio">Error de comunicación con el servidor.</td></tr>';
+			tbody.innerHTML = '<tr><td colspan="7" class="bnc-vacio">Error de comunicación con el servidor.</td></tr>';
 		}
 	}
 
@@ -5046,20 +5628,62 @@
 		const tbody = document.getElementById('bol-tbody');
 
 		if (!lista.length) {
-			tbody.innerHTML = '<tr><td colspan="6" class="bnc-vacio">Sin registros en la lista.</td></tr>';
+			tbody.innerHTML = '<tr><td colspan="7" class="bnc-vacio">Sin registros en la lista.</td></tr>';
 			return;
 		}
 
 		tbody.innerHTML = lista.map(function (b) {
+			const obs = b.observaciones || '';
+			const obsCorta = obs.length > 60 ? escaparHtml(obs.substring(0, 60)) + '…' : escaparHtml(obs);
 			return '<tr>' +
 				'<td>' + (b.nombres || '') + '</td>' +
 				'<td>' + (b.apellido_paterno || '') + '</td>' +
 				'<td>' + (b.apellido_materno || '') + '</td>' +
+				'<td title="' + escaparHtml(obs) + '">' + (obsCorta || '<span style="color:#bbb;">—</span>') + '</td>' +
 				'<td>' + (b.capturado_por || '—') + '</td>' +
 				'<td>' + (b.fec_captura || '') + '</td>' +
-				'<td style="text-align:right;"><button class="bnc-btn-icon" title="Eliminar" onclick="eliminarBoletinadoFila(' + b.id + ')">🗑️</button></td>' +
+				'<td style="text-align:right; white-space:nowrap;">' +
+					'<button class="bnc-btn-icon" title="Editar observaciones" onclick="editarObservacionBoletinado(' + b.id + ')">📝</button>' +
+					'<button class="bnc-btn-icon" title="Eliminar" onclick="eliminarBoletinadoFila(' + b.id + ')">🗑️</button>' +
+				'</td>' +
 				'</tr>';
 		}).join('');
+	}
+
+	function actualizarContadorBolObs() {
+		const len = document.getElementById('bol-observaciones').value.length;
+		document.getElementById('bol-obs-contador').textContent = len + ' / 500';
+	}
+
+	async function editarObservacionBoletinado(id) {
+		const actual = boletinadosCache.find(function (b) { return b.id == id; });
+
+		const { value: nuevoTexto, isConfirmed } = await Swal.fire({
+			icon: 'question',
+			title: 'Observaciones',
+			input: 'textarea',
+			inputValue: actual ? (actual.observaciones || '') : '',
+			inputAttributes: { maxlength: 500 },
+			showCancelButton: true,
+			confirmButtonText: 'Guardar',
+			cancelButtonText: 'Cancelar',
+			confirmButtonColor: '#2B73B6'
+		});
+		if (!isConfirmed) return;
+
+		mostrarLoader();
+		try {
+			const resp = await api({ action: 'actualizarObservacionBoletinado', id, observaciones: (nuevoTexto || '').trim() });
+			ocultarLoader();
+			if (resp.ok) {
+				await cargarBoletinados();
+			} else {
+				Swal.fire('Error', resp.msg || 'No se pudo actualizar.', 'error');
+			}
+		} catch (e) {
+			ocultarLoader();
+			Swal.fire('Error', 'Error de comunicación con el servidor.', 'error');
+		}
 	}
 
 	function filtrarTablaBoletinados(texto) {
@@ -5078,6 +5702,7 @@
 		const nombres = document.getElementById('bol-nombres').value.trim();
 		const apPat   = document.getElementById('bol-apellido-paterno').value.trim();
 		const apMat   = document.getElementById('bol-apellido-materno').value.trim();
+		const observ  = document.getElementById('bol-observaciones').value.trim();
 
 		if (!nombres || !apPat) {
 			Swal.fire('Campos requeridos', 'Captura al menos Nombre(s) y Apellido paterno.', 'warning');
@@ -5088,13 +5713,15 @@
 		try {
 			const resp = await api({
 				action: 'guardarBoletinado',
-				nombres, apellido_paterno: apPat, apellido_materno: apMat
+				nombres, apellido_paterno: apPat, apellido_materno: apMat, observaciones: observ
 			});
 			ocultarLoader();
 			if (resp.ok) {
 				document.getElementById('bol-nombres').value = '';
 				document.getElementById('bol-apellido-paterno').value = '';
 				document.getElementById('bol-apellido-materno').value = '';
+				document.getElementById('bol-observaciones').value = '';
+				actualizarContadorBolObs();
 				Swal.fire({ icon: 'success', title: 'Agregado', timer: 1500, showConfirmButton: false });
 				await cargarBoletinados();
 			} else {

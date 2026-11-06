@@ -30,7 +30,7 @@ require_once('./seg_ventas_reporteador_funciones.php');
 $conecta = new conector();
 
 $usuario    = $_SESSION["nombre"] ?? '';
-$nivelReal  = nivel_usuario(utf8_decode($usuario));
+$nivelReal  = nivelReporteador($conecta, utf8_decode($usuario));
 
 $query = "Select clave from usuarios where nombre='" . mysqli_real_escape_string($conecta->conexion, $usuario) . "'";
 $bd = $conecta->consulta($query);

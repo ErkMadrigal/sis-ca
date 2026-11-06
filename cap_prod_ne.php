@@ -396,16 +396,35 @@
 										$tcontenido->td("","",'','',1,8,'right');
 									$tcontenido->close_tr();									
 								}
+
+								$sql="Select max(str_to_date(fec_fin,'%d/%m/%Y')) as fec_tope from fec_cierre_campana cc
+										join (Select distinct anio,periodo from cumplimiento 
+											  where str_to_date(fecha,'%d/%m/%Y')=(Select max(str_to_date(fecha,'%d/%m/%Y')) from cumplimiento)) c 
+											on (left(cc.campana,10)=c.periodo)";
+								$bdf=$bd->consulta($sql);
+								$tbf=mysqli_fetch_array($bdf);
+									$fec_tope=$tbf['fec_tope'];
+
 								$tcontenido->tr();
 									$tcontenido->td("","",'','',1,7,'right');
 								$tcontenido->close_tr();
 								$tcontenido->tr();
 									$tcontenido->td("Folio:","5%",'','',1,1,'right');
-										$filfolio="Select folio from produccion p
+										$filfolio="Select *
+													from (Select folio from produccion p
+															inner join naps n on (p.nap=n.nap)
+														  where STR_TO_DATE(p.fec_traspaso, '%d/%m/%Y') > '$fec_tope'
+														  union all
+														  Select '8020268579' as folio) f
+													where folio like '%$%' 
+													limit 0,10";
+/*
+Select folio from produccion p
 														inner join naps n on (p.nap=n.nap)
-												   where (folio like '%$%' 
-												   AND STR_TO_DATE(p.fec_traspaso, '%d/%m/%Y') >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)) 
-												   limit 0,10";
+												   where cierre_cap=0 and folio like '%$%' 
+												   AND STR_TO_DATE(p.fec_traspaso, '%d/%m/%Y') >= '$fec_tope' 
+												   limit 0,10
+*/
 										$_SESSION["txtfolio"]=$filfolio;
 									$tcontenido->td($textfolio,'12%','','',1,1,'','',$txtfolio);
 										$textfolio->autocompletar($filfolio,3);
@@ -514,49 +533,48 @@
 						$omes=$tb["mes"];
 						$oanio=$tb["anio"];
 
-	 					$query="Select count(*) as v 
-	 							from (Select folio,fec_traspaso,id_estatus_prod from produccion where nap='$onap') p
-									inner join (select fec_ini,fec_fin from fechas_cierre_com where mes=$omes and anio=$oanio) cf 
-											on (datediff(concat(substr(fec_traspaso,-4),'-',substr(fec_traspaso,4,2),'-',substr(fec_traspaso,1,2)),concat(substr(fec_ini,-4),'-',substr(fec_ini,4,2),'-',substr(fec_ini,1,2)))>=0 
-												and datediff(concat(substr(fec_traspaso,-4),'-',substr(fec_traspaso,4,2),'-',substr(fec_traspaso,1,2)),concat(substr(fec_fin,-4),'-',substr(fec_fin,4,2),'-',substr(fec_fin,1,2)))<=0)
-									left join movilidad m on (p.folio=m.folio)
-								where id_estatus_prod != 6 and ifnull(movilidad,0)=1";
+	 					$query="Select v,folxnap
+								from (Select nap,count(*) as v 
+										from produccion p
+											inner join fechas_cierre_com fcc
+													on (str_to_date(fec_traspaso,'%d/%m/%Y') >= str_to_date(fec_ini,'%d/%m/%Y') 
+															and str_to_date(fec_traspaso,'%d/%m/%Y') <= str_to_date(fec_fin,'%d/%m/%Y'))
+											left join movilidad m on (p.folio=m.folio)
+										where nap='$onap' and  anio=$oanio and mes=$oanio and id_estatus_prod != 6 and ifnull(movilidad,0)=1
+										group by nap) p
+									inner join (Select nap,
+												  case when n.mes in (9,10,11) and n.anio=2026 then
+												  			case when sc='VALEAL CONSULTORES' or sc='JORGE GUERRERO SOTO' 
+												  						or brocker='CRISTIHAN ISRAEL NUNO GONZALEZ' then 45
+												  				 else folxnap
+												  			end 
+												  	   else fcc.folxnap
+												  end as folxnap
+											from (Select * from fechas_cierre_com fcc where anio=$oanio and mes=$oanio) fcc
+												inner join (Select $oanio as anio,$oanio as mes,sc,brocker,nap from naps n
+																inner join estruc_empleados ee on (n.no_empleado=ee.no_empleado)
+															where baja=0 and nap='$onap') n on (fcc.anio=n.anio and fcc.mes=n.mes)) n on (p.nap=n.nap)";
 						$bdd=$bd->consulta($query);
 						$tb=mysqli_fetch_array($bdd);
 						$nfol_nap=$tb["v"];
+						$folios_per=$tb["folxnap"];
 
-						$query="Select folxnap from fechas_cierre_com 
-								where anio=$oanio and mes=$omes";
-						$bdd=$bd->consulta($query);
-						if ($bdd->num_rows != 0)
-						{
-							$tb=mysqli_fetch_array($bdd);
-							$folios_per=$tb["folxnap"];
-							$nap_esquema="NP";
-						}
-						else
-							$nap_esquema="N";
+						if($nfol_nap > ($folios_per - 5))
+								mensaje("El NAP $onap tiene $nfol_nap folios ingresados en el mes comercial, está cerca del límite de los $folios_per permitidos para que no genere cobro de comisión");
 
-						if($nap_esquema=="N")
-						{
-							if($nfol_nap > 35)
-								mensaje("El NAP $onap tiene ya más de 35 folios ingresados en el mes comercial, es altamente probable que no se pague comisión");
-							else
-							{
-								if($nfol_nap > 32)
-									mensaje("El NAP $onap tiene $nfol_nap folios ingresados en el mes comercial, está cerca del límite de los " . ($nfol_nap-5) . " para que no genere cobro de comisión");
-							}
-						}
-						else
-						{
-							if($nfol_nap > $folios_per)
-								mensaje("El NAP $onap tiene ya más de $folios_per folios ingresados en el mes comercial, es altamente probable que no se pague comisión");
-							else
-							{
-								if($nfol_nap > ($folios_per - 5))
-									mensaje("El NAP $onap tiene $nfol_nap folios ingresados en el mes comercial, está cerca del límite de los $folios_per para que no genere cobro de comisión");
-							}
-						}
+						if($nfol_nap > $folios_per)
+							mensaje("El NAP $onap tiene ya más de $folios_per folios ingresados en el mes comercial, es altamente probable que no se pague comisión");
+
+
+
+
+
+
+
+
+
+
+
 
 						$nap= new textbox("nap","naps");
 						$selmov = new select("mov");

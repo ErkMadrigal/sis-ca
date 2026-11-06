@@ -103,11 +103,20 @@ $CAMPOS_REPORTE = [
     'categoria_cliente' => ['label' => 'Categoría cliente',          'grupo' => 'Estatus / Proceso'],
     'ley'               => ['label' => 'Ley',                        'grupo' => 'Estatus / Proceso'],
     'cotiza'            => ['label' => 'Cotiza',                     'grupo' => 'Estatus / Proceso'],
+    'pplus'             => ['label' => 'P+ (cliente)',               'grupo' => 'Estatus / Proceso'],
+    'transfer_out'      => ['label' => 'Transfer out / baja cliente','grupo' => 'Estatus / Proceso'],
 
     // ── Autorización de Vida (AV) ──
     'folio_av'          => ['label' => 'Folio AV',                   'grupo' => 'Autorización de Vida (AV)'],
     'estatus_av'        => ['label' => 'Estatus AV',                 'grupo' => 'Autorización de Vida (AV)'],
     'frecuencia'        => ['label' => 'Frecuencia',                 'grupo' => 'Autorización de Vida (AV)'],
+
+    // ── Campos que trae el reporte viejo (xls de seg_ventas) ──
+    'nivel'             => ['label' => 'Nivel',                      'grupo' => 'Comercial / Estructura'],
+    'categoria'         => ['label' => 'Categoría',                  'grupo' => 'Comercial / Estructura'],
+    'tipo_venta'        => ['label' => 'Tipo venta',                 'grupo' => 'Producción / Movimiento'],
+    'fec_ult_traspaso'  => ['label' => 'Fecha últ. traspaso',        'grupo' => 'Fechas'],
+    'estatus_pago'      => ['label' => 'Estatus pago',               'grupo' => 'Estatus / Proceso'],
     'autoriza_sin_av'   => ['label' => 'Autorización sin AV',        'grupo' => 'Autorización de Vida (AV)'],
 ];
 
@@ -128,6 +137,27 @@ $CAMPOS_SOLO_ADMIN = ['telefono', 'celular', 'cp', 'email_trab', 'frecuencia'];
    para VALIDAR en el backend (seg_ventas_reporteador_api.php y
    seg_ventas_reporteador_excel.php) qué campos puede pedir cada quien —
    nunca hay que confiar solo en que la pantalla los oculte. */
+/* Nivel "efectivo" para el Reporteador: un usuario nivel 6 que además
+   está dado de alta en carobra_2014.permisos_sv funge como administrador
+   (nivel 12). Cualquier otro caso regresa su nivel normal.
+   $nombreDecodificado = nombre ya con utf8_decode (como se pasa a nivel_usuario). */
+function nivelReporteador($conecta, $nombreDecodificado) {
+    $nivel = nivel_usuario($nombreDecodificado);
+    if ($nivel != 6) return $nivel;
+
+    $nomEsc = mysqli_real_escape_string($conecta->conexion, $nombreDecodificado);
+    $rs = $conecta->consulta("Select clave from empl_usuarios where nombre='$nomEsc' limit 1");
+    $r  = $rs ? mysqli_fetch_assoc($rs) : null;
+    $cl = trim($r['clave'] ?? '');
+    if ($cl === '') return $nivel;
+
+    $clEsc = mysqli_real_escape_string($conecta->conexion, $cl);
+    $rs2 = $conecta->consulta("Select 1 from carobra_2014.permisos_sv where clave='$clEsc' limit 1");
+    if ($rs2 && mysqli_num_rows($rs2) > 0) return 12;
+
+    return $nivel;
+}
+
 function camposVisiblesParaNivel($nivel, $catalogo) {
     if ($nivel == 12) return $catalogo;
     global $CAMPOS_SOLO_ADMIN;
@@ -483,7 +513,10 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
     $nivel    = $p['nivel']    ?? 0;
     $nombreUsuario = $p['nombre'] ?? '';
 
-    $resultado = ['ok' => true, 'msg' => '', 'tit_mes' => '', 'filas' => [], 'limitado' => false];
+    $modoCache = !empty($p['cache_build']);   /* true = llenar sv_cache_new (ver sv_cache_funciones.php) */
+    $enVivo    = !empty($p['en_vivo']);       /* true = ignorar la caché */
+
+    $resultado = ['ok' => true, 'msg' => '', 'tit_mes' => '', 'filas' => [], 'limitado' => false, 'origen' => 'vivo', 'cache_at' => ''];
 
     if (!in_array($filtro, $FILTROS_REPORTEADOR, true)) {
         $resultado['ok']  = false;
@@ -507,6 +540,7 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
     $q_emp   = 1;
     $w_nap   = '';
     $qestruc = '';
+    $cacheWhere = '';   /* mismo filtro estructural pero contra sv_cache (alias c) */
 
     if (!$esFolio) {
 
@@ -575,26 +609,41 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
         $fec_fin = $valor3;
 
         /* ── Armar el filtro estructural (mismo criterio que seg_ventas.php) ── */
-        if ($filtro == "Soc. Comercial") {
+
+        /* "TODOS"/"TODAS" (solo admin, nivel 12): no se filtra por SC /
+           SubBrocker / Gerencia / NAP / Comisionista; solo aplica el
+           rango de fechas. Para cualquier otro nivel se ignora esta
+           palabra clave y se busca como valor literal (no encuentra nada). */
+        $valorNorm = mb_strtoupper(trim($valor1), 'UTF-8');
+        $esTodos   = ($nivel == 12 && ($valorNorm === 'TODOS' || $valorNorm === 'TODAS'));
+
+        if ($esTodos) {
+            $qestruc = "(Select * from carobra_2014.estruc_empleados)";
+            /* $q_emp = 1, $w_nap = '', $cacheWhere = '' -> sin filtro estructural */
+        } elseif ($filtro == "Soc. Comercial") {
             $valor1Esc = mysqli_real_escape_string($conecta->conexion, $valor1);
             $qestruc = "(Select * from carobra_2014.estruc_empleados where sc='$valor1Esc')";
+            $cacheWhere = " AND c.sc='$valor1Esc'";
         } elseif ($filtro == "SubBrocker") {
             $valor1Esc = mysqli_real_escape_string($conecta->conexion, $valor1);
             $qestruc = "(Select * from carobra_2014.estruc_empleados where brocker='$valor1Esc')";
+            $cacheWhere = " AND c.brocker='$valor1Esc'";
         } elseif ($filtro == "Gerencia") {
-            if ($valor1 != "TODAS") {
+            if (true) {
                 $valor1Esc = mysqli_real_escape_string($conecta->conexion, $valor1);
                 $qestruc = "(Select * from carobra_2014.estruc_empleados where gerencia='$valor1Esc')";
+                $cacheWhere = " AND c.gerencia='$valor1Esc'";
             } else {
-                $qestruc = "carobra_2014.estruc_empleados";
+                $qestruc = "(Select * from carobra_2014.estruc_empleados)";
             }
         } elseif ($filtro == "NAP") {
             $partes = explode("(", $valor1);
             $nap = str_replace(")", "", $partes[1] ?? $valor1);
             $nap = trim($nap);
             $napEsc = mysqli_real_escape_string($conecta->conexion, $nap);
-            $qestruc = "carobra_2014.estruc_empleados";
+            $qestruc = "(Select * from carobra_2014.estruc_empleados)";
             $w_nap = " and p.nap='$napEsc'";
+            $cacheWhere = " AND c.nap='$napEsc'";
         } else { // Comisionista
             $q_emp = 0;
             $nombreEmp = ($valor1 == "Usuario de prueba") ? "MARIA MAYRA SANTOS CORTES" : $valor1;
@@ -604,6 +653,33 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
             $tb = $bd ? mysqli_fetch_array($bd) : null;
             $noEmp = intval($tb[0] ?? 0);
             $qestruc = "(Select * from carobra_2014.estruc_empleados where no_empleado=$noEmp)";
+            $cacheWhere = " AND c.no_empleado=$noEmp AND $noEmp>0";
+        }
+        /* con "saldo real > 0" el cruce original NO usa el respaldo por NAP
+           (p.no_empleado=ee.no_empleado) -> excluir los folios con no_empleado=0 */
+        if ($q_emp == 1 && $srm0 == 1) { $cacheWhere .= " AND c.no_empleado<>0"; }
+
+        /* ── ⚡ Ruta rápida: caché precalculada (sin tablas temporales ni UPDATEs) ── */
+        if (!$modoCache && !empty($valor1)) {
+            $iso = function ($d) { return substr($d, -4) . '-' . substr($d, 3, 2) . '-' . substr($d, 0, 2); };
+            $iniY = $iso($fec_inc); $finY = $iso($fec_fin);
+            if (svCacheUsable($conecta, $iniY, $finY, $enVivo)) {
+                $limInt = max(1, intval($limite));
+                $filasC = svCacheConsultar($conecta, [
+                    'fec_ini' => $iniY, 'fec_fin' => $finY, 'reg_esp' => $reg_esp,
+                    'sfp' => $sfp, 'srm0' => $srm0, 'where' => $cacheWhere,
+                ], $limInt);
+                if ($filasC !== null) {
+                    $est = svCacheEstado($conecta);
+                    $resultado['filas']    = $filasC;
+                    $resultado['limitado'] = (count($filasC) >= $limInt);
+                    $resultado['origen']   = 'cache';
+                    $resultado['cache_at'] = $est['refreshed_at'] ?? '';
+                    if (empty($filasC)) $resultado['msg'] = 'Sin resultados para estos filtros.';
+                    svCacheProgramarRefresco($conecta);
+                    return $resultado;
+                }
+            }
         }
     }
 
@@ -622,119 +698,132 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
         return $resultado;
     }
 
+    /* ── ⚡ Folio: ruta rápida contra la caché (si el folio está en su ventana) ── */
+    if ($esFolio && !$modoCache && svCacheUsable($conecta, null, null, $enVivo)) {
+        $condC = condicionFolioParaNivel($conecta, $nivel, $nombreUsuario);
+        $condC = str_replace(['p.no_empleado', 'ee.'], ['c.no_empleado', 'c.'], $condC);
+        $filasC = svCacheConsultar($conecta, ['folio' => trim($valor1), 'cond_folio' => $condC], max(1, intval($limite)));
+        if (!empty($filasC)) {
+            $est = svCacheEstado($conecta);
+            $resultado['filas']    = $filasC;
+            $resultado['limitado'] = (count($filasC) >= max(1, intval($limite)));
+            $resultado['origen']   = 'cache';
+            $resultado['cache_at'] = $est['refreshed_at'] ?? '';
+            svCacheProgramarRefresco($conecta);
+            return $resultado;
+        }
+    }
+
     /* ── Tabla temporal de trabajo (nombre único por consulta) ── */
     $sufijo = date("dmYGis") . '_' . mt_rand(1000, 9999);
     $qsv = "w_rep_" . preg_replace('/[^A-Za-z0-9_]/', '', $clave) . "_" . $sufijo;
-    $conecta->consulta("Create TABLE $qsv LIKE sv");
+    $conecta->consulta("Create TABLE $qsv LIKE sv2");
+
+    $ttProd = '';
 
     if ($esFolio) {
 
-        /* Búsqueda puntual por folio: un solo SELECT directo contra
-           produccion, sin filtro estructural ni rango de fechas -- solo
-           filtra por número de folio (LIKE para tolerar que el usuario
-           no lo escriba completo/exacto). sc/brocker/id_gerencia/gerencia
-           NO son columnas de produccion (viven en estruc_empleados), así
-           que igual necesitan el LEFT JOIN aunque no se filtre por
-           estructura -- LEFT y no INNER para no perder el folio si el
-           empleado dueño no tiene fila en estruc_empleados. */
+        /* Búsqueda puntual por folio: sin rango de fechas ni filtro
+           estructural, solo número de folio (LIKE para tolerar que el
+           usuario no lo escriba completo). LEFT JOIN a estruc_empleados,
+           naps y calendarios para no perder el folio si falta alguno.
+           Mismo layout de columnas que sv2 (ver seg_ventas.php). */
         $folioEsc = mysqli_real_escape_string($conecta->conexion, trim($valor1));
 
-        /* FIX DE SEGURIDAD: antes esta búsqueda no tenía NINGÚN filtro
-           de estructura -- ver condicionFolioParaNivel() arriba para
-           el detalle del bug. Admin (nivel 12) sigue sin restricción;
-           cualquier otro nivel solo puede encontrar folios de su
-           propia rama (o, si el nivel no se reconoce, ninguno). */
+        /* Seguridad: ver condicionFolioParaNivel() -- admin sin
+           restricción; otros niveles solo su propia rama. */
         $condicionFolio = condicionFolioParaNivel($conecta, $nivel, $nombreUsuario);
 
         $query = "Insert into carobra_2014.$qsv
-                    Select p.folio,'','','','','',id_estatus_prod,
-                           0,estatus_confirma,cierre_cap,0,
-                           0,id_tipo_mov,nss,'',nap,'','',afo_cedente,'','',
+                    Select p.folio,'','','','','',p.id_estatus_prod,p.id_estatus_prod,p.estatus_confirma,p.cierre_cap,0,
+                           0,p.id_tipo_mov,p.nss,'',p.nap,'','',p.afo_cedente,'','',
                            '',ee.sc,ee.brocker,ee.id_gerencia,ee.gerencia,
-                           id_usuario_cap,'','',p.no_empleado,'','',
-                           id_estatus_anticipo,monto_anticipo,0,
-                           saldo_estimado,0,0,'',fec_captura,fec_pago_ant,
-                           '',fec_traspaso,fec_cierre,'','',
-                           fec_ult_estatus,'','','',0,'',''
+                           p.id_usuario_cap,'',fc.campana,p.no_empleado,'','',
+                           p.id_estatus_anticipo,p.monto_anticipo,0,
+                           p.saldo_estimado,0,0,if(f.mes <=12,m.mes_largo,f.nom_periodo),p.fec_captura,p.fec_pago_ant,
+                           '',p.fec_traspaso,p.fec_cierre,'','',
+                           p.fec_ult_estatus,'','','',0,''
                     FROM carobra_2014.produccion p
+                        LEFT JOIN carobra_2014.naps n on (p.nap=n.nap)
                         LEFT JOIN carobra_2014.estruc_empleados ee
-                                on (p.no_empleado=ee.no_empleado)
+                                on (if(p.no_empleado=0,n.no_empleado,p.no_empleado)=ee.no_empleado)
+                        LEFT JOIN fec_cierre_campana fc
+                                on (str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date(fc.fec_ini,'%d/%m/%Y')
+                                    and str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date(fc.fec_fin,'%d/%m/%Y'))
+                        LEFT JOIN fechas_cierre_com f
+                                on (str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date(f.fec_ini,'%d/%m/%Y')
+                                    and str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date(f.fec_fin,'%d/%m/%Y'))
+                        LEFT JOIN meses m on (f.mes=m.no_mes)
                     WHERE p.folio LIKE '%$folioEsc%' $condicionFolio";
 
     } else {
 
-        $query = "Insert into carobra_2014.$qsv
-                    Select p.folio,'','','','','',id_estatus_prod,
-                           0,estatus_confirma,cierre_cap,0,
-                           0,id_tipo_mov,nss,'',nap,'','',afo_cedente,'','',
-                           '',sc,brocker,id_gerencia,gerencia,
-                           id_usuario_cap,'','',p.no_empleado,'','',
-                           id_estatus_anticipo,monto_anticipo,0,
-                           saldo_estimado,0,0,'',fec_captura,fec_pago_ant,
-                           '',fec_traspaso,fec_cierre,'','',
-                           fec_ult_estatus,'','','',0,'',''
-                    FROM carobra_2014.produccion p
-                        inner join $qestruc ee
-                                on (p.no_empleado=ee.no_empleado)";
-
+        /* Igual que seg_ventas.php (versión optimizada): primero una
+           tabla temporal con los folios del rango (indexada), luego un
+           solo INSERT con CTEs de estructura/campaña/mes -- ya no hay
+           UNION ALL ni UPDATEs de nom_mes/campana. */
         $w_query = " where p.fec_traspaso REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
                         AND str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date('$fec_inc','%d/%m/%Y')
                         AND str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date('$fec_fin','%d/%m/%Y')
                         $w_nap";
+        if ($reg_esp != 2) {
+            $w_query .= ($reg_esp == 1) ? " and length(p.folio) < 10 " : " and length(p.folio) >= 10 ";
+        }
 
-        $w_query .= ($reg_esp == 1) ? " and length(p.folio) < 10 " : " and length(p.folio) >= 10 ";
+        if ($srm0 == 0 && $q_emp == 1) {
+            $qcruce = "if(p.no_empleado=0,n.no_empleado,p.no_empleado)=ee.no_empleado";
+        } else {
+            $qcruce = "p.no_empleado=ee.no_empleado";
+        }
 
+        $ttProd = "w_rep_prod_" . preg_replace('/[^A-Za-z0-9_]/', '', $clave) . "_" . $sufijo;
+        $conecta->consulta("Create TABLE $ttProd as
+                            Select p.*,STR_TO_DATE(fec_traspaso, '%d/%m/%Y') as fec_traspaso_date
+                            FROM carobra_2014.produccion p $w_query");
+        $conecta->consulta("Alter TABLE $ttProd
+                              ADD INDEX idx_nap (nap),
+                              ADD INDEX idx_no_empleado (no_empleado),
+                              ADD INDEX idx_fec_traspaso (fec_traspaso_date)");
+
+        $query = "Insert into carobra_2014.$qsv
+                    with
+                        estruc as $qestruc,
+                        fec_cierre as (Select campana,STR_TO_DATE(fec_ini, '%d/%m/%Y') as fec_ini,
+                                              STR_TO_DATE(fec_fin, '%d/%m/%Y') as fec_fin
+                                       from fec_cierre_campana),
+                        meses as (Select if(fc.mes <=12,m.mes_largo,fc.nom_periodo) as nom_mes,
+                                         STR_TO_DATE(fec_ini, '%d/%m/%Y') as fec_ini,
+                                         STR_TO_DATE(fec_fin, '%d/%m/%Y') as fec_fin
+                                  from fechas_cierre_com fc
+                                        left join meses m on (fc.mes=m.no_mes))
+                    Select p.folio,'','','','','',p.id_estatus_prod,p.id_estatus_prod,p.estatus_confirma,p.cierre_cap,0,0,p.id_tipo_mov,p.nss,
+                           '',p.nap,'','',p.afo_cedente,'','','',ee.sc,ee.brocker,ee.id_gerencia,ee.gerencia,p.id_usuario_cap,'',ifnull(fc.campana,''),
+                           p.no_empleado,'','',p.id_estatus_anticipo,p.monto_anticipo,0,p.saldo_estimado,0,0,ifnull(m.nom_mes,''),p.fec_captura,
+                           p.fec_pago_ant,'',p.fec_traspaso,p.fec_cierre,'','',p.fec_ult_estatus,'','','',0,''
+                    from $ttProd p
+                        join carobra_2014.naps n on (p.nap=n.nap)
+                        join estruc ee on ($qcruce)
+                        left join fec_cierre fc on (p.fec_traspaso_date BETWEEN fc.fec_ini and fc.fec_fin)
+                        left join meses m on (p.fec_traspaso_date BETWEEN m.fec_ini and m.fec_fin)";
+
+        $w2 = "";
         if ($sfp == 1) {
             $query .= " left join carobra_2014.calculo_pago cp on (p.folio=cp.folio) ";
-            $w_query .= " and ifnull(cp.fec_pago,'')=''";
+            $w2 = " where ifnull(cp.fec_pago,'')=''";
             if ($srm0 == 1) {
                 $query .= " left join carobra_2014.pagos pa on (p.folio=pa.folio) ";
-                $w_query .= " and ifnull(pa.saldo_real,0)!=0";
+                $w2 .= " and ifnull(pa.saldo_real,0)!=0";
             }
         } else if ($srm0 == 1) {
             $query .= " left join carobra_2014.pagos pa on (p.folio=pa.folio) ";
-            $w_query .= " and ifnull(pa.saldo_real,0)!=0";
+            $w2 = " where ifnull(pa.saldo_real,0)!=0";
         }
-
-        $query .= $w_query;
-
-        if ($srm0 == 0 && $q_emp == 1) {
-            $query .= " union all
-                        Select p.folio,'','','','','',id_estatus_prod,
-                               0,estatus_confirma,cierre_cap,0,0,id_tipo_mov,p.nss,'',p.nap,
-                               '','',afo_cedente,'','','',sc,brocker,id_gerencia,gerencia,id_usuario_cap,'','',
-                               p.no_empleado,'','',id_estatus_anticipo,monto_anticipo,0,saldo_estimado,0,0,'',
-                               fec_captura,fec_pago_ant,'',fec_traspaso,fec_cierre,'','',fec_ult_estatus,'','','',0,'',''
-                        FROM carobra_2014.produccion p
-                            inner join carobra_2014.naps n on (p.nap=n.nap)
-                            inner join $qestruc ee on (n.no_empleado=ee.no_empleado)";
-            $w_query = " where p.no_empleado=0 and p.fec_traspaso REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
-                            AND str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date('$fec_inc','%d/%m/%Y')
-                            AND str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date('$fec_fin','%d/%m/%Y')
-                            $w_nap";
-            $w_query .= ($reg_esp == 1) ? " and length(p.folio) < 10 " : " and length(p.folio) >= 10 ";
-            $query .= $w_query;
-
-            $query .= " union all
-                        Select p.folio,'','','','','',id_estatus_prod,
-                               0,estatus_confirma,cierre_cap,0,0,id_tipo_mov,p.nss,'',p.nap,
-                               '','',afo_cedente,'','','',sc,brocker,id_gerencia,gerencia,id_usuario_cap,'','',
-                               p.no_empleado,'','',id_estatus_anticipo,monto_anticipo,0,saldo_estimado,0,0,'',
-                               fec_captura,fec_pago_ant,'',fec_traspaso,fec_cierre,'','',fec_ult_estatus,'','','',0,'',''
-                        FROM carobra_2014.produccion p
-                            inner join carobra.empleados e on (p.nap=e.nae)
-                            inner join $qestruc ee on (e.no_empleado=ee.no_empleado)";
-            $w_query = " where p.no_empleado=0 and p.fec_traspaso REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
-                            AND str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date('$fec_inc','%d/%m/%Y')
-                            AND str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date('$fec_fin','%d/%m/%Y')
-                            $w_nap";
-            $w_query .= ($reg_esp == 1) ? " and length(p.folio) < 10 " : " and length(p.folio) >= 10 ";
-            $query .= $w_query;
-        }
+        $query .= $w2;
     }
 
     $conecta->consulta($query);
     $errInsert = mysqli_error($conecta->conexion);
+    if ($ttProd !== '') { $conecta->consulta("Drop TABLE IF EXISTS $ttProd"); }
 
     $bd = $conecta->consulta("Select 1 from carobra_2014.$qsv");
     if (!$bd || $bd->num_rows == 0) {
@@ -775,18 +864,6 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
 
     /* ── Enriquecer (mismas ~15 actualizaciones que seg_ventas.php) ── */
     $updates   = [];
-    $updates[] = "Update $qsv s
-                    JOIN fechas_cierre_com f
-                            on (str_to_date(s.fec_traspaso,'%d/%m/%Y') >= str_to_date(f.fec_ini,'%d/%m/%Y')
-                                    and str_to_date(s.fec_traspaso,'%d/%m/%Y') <= str_to_date(f.fec_fin,'%d/%m/%Y'))
-                    JOIN meses m on (f.mes=m.no_mes)
-                  SET s.nom_mes=if(f.mes <=12,m.mes_largo,f.nom_periodo)";
-
-    $updates[] = "Update $qsv s, fec_cierre_campana f
-                  set s.campana=f.campana
-                  where str_to_date(s.fec_traspaso,'%d/%m/%Y') >= str_to_date(f.fec_ini,'%d/%m/%Y')
-                      and str_to_date(s.fec_traspaso,'%d/%m/%Y') <= str_to_date(f.fec_fin,'%d/%m/%Y')";
-
     $updates[] = "Update $qsv s, $t_pt pt
                   set s.trabajador=pt.trabajador,s.telefono=pt.telefono,
                       s.celular=pt.celular,s.cp=pt.cp,
@@ -845,14 +922,9 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
                   where s.folio_av !='' and s.folio_av=avf.folio";
 
     $updates[] = "Update carobra_2014.$qsv s
-                    join carobra_2014.pagos_folios_sin_av pav
-                        on (s.folio=pav.folio)
-                    join carobra.usuarios u on (pav.autoriza=u.clave)
-                  set s.men_autoriza=concat('Pago autorizado sin AV el ',pav.fec_autoriza,' por ',u.nombre)";
-
-    $updates[] = "Update $qsv s, extemporaneos a
-                  set s.descrip=concat('Pago extemporaneo el ',a.fec_pago)
-                  where s.folio=a.folio";
+                    join carobra_2014.clawback c on (s.folio=c.folio)
+                  set s.transfer_out='Baja del cliente'
+                  where cancelacion=0";
 
     $updates[] = "Update carobra_2014.$qsv s, $t_ap ap
                   set s.saldo_pago=ap.saldo_real
@@ -877,6 +949,7 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
     /* ── SELECT final (mismas columnas que seg_ventas.php, ya con
        nombres que calzan 1:1 con las keys de $CAMPOS_REPORTE) ── */
     $limiteInt = max(1, intval($limite));
+    $extraCache = $modoCache ? ", STR_TO_DATE(s.fec_traspaso,'%d/%m/%Y') as fec_traspaso_date" : "";
     $query = "Select distinct
                    concat(if(id_tipo_mov=1,'Traspaso','Registro'),' ',if(ifnull(n.nap,'')='','NAE','NAP')) as tipo_prod,
                    s.folio,nss,trabajador,s.nombre,s.clave,s.no_empleado,s.telefono,s.celular,s.cp,s.email_trab,
@@ -886,28 +959,65 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
                    if(id_tipo_mov=1,'Traspaso','Registro') as movimiento,fec_pago_ant2 as fec_ant2,s.fec_traspaso,
                    s.fec_captura,fec_pago_ant as fec_anticipo,fec_pago,trec.tipo_rechazo,af.afore,r.rechazo,
                    curp,eu.nombre as analista,if(cierre_cap=0,'No','Si') as cierre_cap,observa,fec_rechazo,descrip,
-                   fec_cierre,folio_av,estatus_av,fec_envio,no_oportunidad,men_autoriza as autoriza_sin_av,
+                   fec_cierre,folio_av,estatus_av,fec_envio,no_oportunidad,'' as autoriza_sin_av,transfer_out,
                    esf.estatus as estatus_pbi,campana,
                    if(confirma='','',if(substring(confirma,-10)='Confirmado',confirma,concat('En proceso (',confirma,')'))) as confirma,
                    saldo_pago,frecuencia,edad,fec_desc,m.fec_sello,
                    case when m.movilidad=1 then 'Igual o mayor a 18 meses'
                         else if(ifnull(m.folio,0)=0,'Sin estatus movilidad','Menos de 18 meses')
                    end as movilidad,m.fec_captura as cap_movilidad,
+                   if(m.pplus='','',concat('Cliente ',m.pplus)) as pplus,
                    m.ley,m.categoria_cliente,
                    case when m.cotiza=1 then 'SI'
                         when m.cotiza=0 then 'NO'
                         else ''
-                   end as cotiza
+                   end as cotiza,
+                   /* Nivel del comisionista dentro de la estructura (mismo resultado que el
+                      reporte viejo): SC / SubBroker / Gerente / Asesor; vacío si el folio no
+                      trae empleado. */
+                   case when s.no_empleado=0 or ifnull(s.nombre,'')='' then ''
+                        when s.nombre=s.sc then 'Socio Comercial'
+                        when s.nombre=s.brocker then 'SubBroker'
+                        when ifnull(s.gerencia,'')<>'' and s.nombre like concat(s.gerencia,'%') then 'Gerente'
+                        else 'Asesor'
+                   end as nivel,
+                   case ce.ce_categoria
+                        when 1 then 'Comisionista'
+                        when 2 then 'Gerente Comisionista'
+                        when 3 then 'Gerente Premium'
+                        when 4 then 'Gerente Master'
+                        when 5 then 'Gerente Elite'
+                        else ''
+                   end as categoria,
+                   /* Venta propia = el folio es del dueño del NAP (o no trae empleado y se
+                      resolvió por NAP); referida = capturado con empleado distinto al del NAP. */
+                   case when s.no_empleado=0 or s.no_empleado=ifnull(n.no_empleado,0) then 'Venta propia'
+                        else 'Venta referida'
+                   end as tipo_venta,
+                   '' as fec_ult_traspaso,
+                   '' as estatus_pago $extraCache
               from carobra_2014.$qsv s
                 left join carobra_2014.naps n on (s.nap=n.nap)
+                left join (Select no_empleado as ce_no_empleado, max(categoria) as ce_categoria
+                           from carobra.empleados group by no_empleado) ce
+                       on (s.no_empleado>0 and s.no_empleado=ce.ce_no_empleado)
                 left join carobra_2014.estatus esf on (s.id_estatus_prod=esf.id_estatus)
                 left join tipo_rechazo trec on (s.id_tipo_rechazo=trec.id_tipo)
                 left join afores af on (s.afo_cedente=af.clave)
                 left join rechazos r on (s.id_rechazo=r.id_rechazo)
                 left join empl_usuarios eu on (s.id_usuario_cap=eu.no_empleado)
-                left join movilidad m on (s.folio=m.folio)
-              LIMIT $limiteInt";
+                left join movilidad m on (s.folio=m.folio)";
 
+    if ($modoCache) {
+        global $SV_CACHE_COLS;
+        $conecta->consulta("Insert into carobra_2014.sv_cache_new (" . implode(',', $SV_CACHE_COLS) . ",fec_traspaso_date) " . $query);
+        $conecta->consulta("DROP TABLE $qsv");
+        $resultado['msg'] = mysqli_error($conecta->conexion);
+        $resultado['ok']  = ($resultado['msg'] === '');
+        return $resultado;
+    }
+
+    $query .= " LIMIT $limiteInt";
     $bd = $conecta->consulta($query);
     $filas = [];
     if ($bd) {
@@ -921,5 +1031,9 @@ function obtenerDatosReporte($conecta, $p, $limite = 2000) {
     $resultado['filas']    = $filas;
     $resultado['limitado'] = (count($filas) >= $limiteInt);
 
+    svCacheProgramarRefresco($conecta);
+
     return $resultado;
 }
+
+require_once(__DIR__ . '/sv_cache_funciones.php');

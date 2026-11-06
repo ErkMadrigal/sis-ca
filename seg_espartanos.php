@@ -33,12 +33,12 @@
 			}
 
 			/* ── Equipos ──
-			   Las tarjetas de Equipo 1/2/3 se quitaron de la vista; quedan
-			   dos tarjetas angostas: Premios por lugar y Rangos de meta
+			   Quedan dos tarjetas angostas: "Premios por lugar" (que ahora
+			   también trae los equipos con su líder) y "Rangos de meta"
 			   (esta última aplica igual para TODOS los espartanos, no es
 			   por persona). */
 			.esp-equipos-wrap{
-				display:grid; grid-template-columns:minmax(280px, 380px) minmax(280px, 380px); gap:16px; margin-bottom:26px;
+				display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 380px)); gap:16px; margin-bottom:26px;
 			}
 
 			.esp-equipo-card{
@@ -79,6 +79,12 @@
 			.esp-premio-row{ display:flex; justify-content:space-between; align-items:center; background:#fff; border:1px solid #dbe9fb; border-radius:10px; padding:9px 13px; font-size:12.5px; }
 			.esp-premio-row label{ color:#5b7fa6; font-weight:700; margin:0; }
 			.esp-premio-row .esp-valor{ font-weight:800; color:#0f4d8a; font-size:14px; }
+
+			/* Equipos dentro de la tarjeta de premios: una fila por equipo con su líder */
+			.esp-equipo-item{ display:flex; justify-content:space-between; align-items:center; gap:10px; background:#fff; border:1px solid #dbe9fb; border-radius:10px; padding:9px 13px; font-size:12.5px; }
+			.esp-equipo-item .esp-eq-nombre{ font-weight:800; color:#0f4d8a; font-size:13px; }
+			.esp-equipo-item .esp-eq-lider{ color:#5b7fa6; font-size:12px; margin-top:2px; }
+			.esp-equipo-item .esp-eq-lider.sin{ color:#aaa; font-style:italic; }
 
 			.btn-esp-mini{
 				-webkit-appearance:none; -moz-appearance:none; appearance:none;
@@ -140,8 +146,13 @@
 			.esp-badge-1{ background:#e7f0fa; color:#185FA5; }
 			.esp-badge-2{ background:#e3f4ee; color:#0F6E56; }
 			.esp-badge-3{ background:#fbf0dd; color:#B7791F; }
+			.esp-badge-n{ background:#efe9fa; color:#5b3fa0; }   /* equipos nuevos (4 en adelante) */
 			.esp-badge-sin{ background:#f0f2f5; color:#8a94a3; }
 			.esp-badge-sin::before{ display:none; }
+
+			/* Tipo de incidencia: falta / retardo */
+			.esp-badge-falta{ background:#fdeeee; color:#c0392b; }
+			.esp-badge-retardo{ background:#fff6da; color:#a06b00; }
 
 			.esp-acciones-fila{ display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
 
@@ -152,8 +163,9 @@
 				position:fixed; inset:0; background:rgba(15,23,42,.6); z-index:99999998; display:none;
 				justify-content:center; align-items:center; padding:1.5rem; backdrop-filter:blur(3px);
 			}
-			.esp-modal{ background:#fff; border-radius:14px; width:100%; max-width:420px; box-shadow:0 25px 60px rgba(0,0,0,.3); overflow:hidden; }
-			.esp-modal-header{ background:#185FA5; color:#fff; padding:14px 20px; font-size:14.5px; font-weight:700; display:flex; justify-content:space-between; align-items:center; }
+			/* overflow visible: el dropdown del buscador de espartano no se corta en el borde del modal */
+			.esp-modal{ background:#fff; border-radius:14px; width:100%; max-width:420px; box-shadow:0 25px 60px rgba(0,0,0,.3); overflow:visible; }
+			.esp-modal-header{ background:#185FA5; color:#fff; padding:14px 20px; font-size:14.5px; font-weight:700; display:flex; justify-content:space-between; align-items:center; border-radius:14px 14px 0 0; }
 			.esp-modal-header button{ background:rgba(255,255,255,.15); border:none; color:#fff; width:26px; height:26px; border-radius:7px; cursor:pointer; font-size:14px; }
 			.esp-modal-header button:hover{ background:rgba(255,255,255,.28); }
 			.esp-modal-body{ padding:18px 20px; display:flex; flex-direction:column; gap:14px; }
@@ -163,15 +175,26 @@
 			.esp-campo input, .esp-campo select{ width:100%; border:1px solid #dbe4ec; border-radius:8px; padding:8px 11px; font-size:13px; box-sizing:border-box; }
 			.esp-campo input:focus, .esp-campo select:focus{ outline:none; border-color:#185FA5; box-shadow:0 0 0 3px rgba(24,95,165,.1); }
 
-			.esp-equipo-opciones{ display:flex; gap:8px; }
+			.esp-equipo-opciones{ display:flex; flex-wrap:wrap; gap:8px; }
 			.esp-equipo-opcion{
-				flex:1; text-align:center; border:1.5px solid #dbe4ec; border-radius:9px; padding:9px 6px;
+				flex:1 1 90px; text-align:center; border:1.5px solid #dbe4ec; border-radius:9px; padding:9px 6px;
 				font-size:12px; font-weight:700; cursor:pointer; color:#8a94a3; transition:all .12s;
 			}
 			.esp-equipo-opcion.activo{ border-color:var(--esp-color,#185FA5); color:var(--esp-color,#185FA5); background:#f5f9fd; }
 			.esp-equipo-opcion[data-equipo="1"]{ --esp-color:#185FA5; }
 			.esp-equipo-opcion[data-equipo="2"]{ --esp-color:#0F6E56; }
 			.esp-equipo-opcion[data-equipo="3"]{ --esp-color:#B7791F; }
+
+			/* Cards para elegir Falta / Retardo */
+			.esp-tipo-opciones{ display:flex; gap:10px; }
+			.esp-tipo-opcion{
+				flex:1; text-align:center; border:1.5px solid #dbe4ec; border-radius:10px; padding:14px 8px;
+				font-size:13px; font-weight:700; cursor:pointer; color:#8a94a3; transition:all .12s; background:#fff;
+			}
+			.esp-tipo-opcion .esp-tipo-icono{ display:block; font-size:22px; margin-bottom:4px; }
+			.esp-tipo-opcion:hover{ border-color:#b5c7dc; }
+			.esp-tipo-opcion[data-tipo="falta"].activo{ border-color:#c0392b; color:#c0392b; background:#fdf2f2; }
+			.esp-tipo-opcion[data-tipo="retardo"].activo{ border-color:#d08a00; color:#a06b00; background:#fffaf0; }
 
 			.esp-modal-nombres{ font-size:12px; color:#5a6570; background:#f7fafc; border-radius:8px; padding:9px 12px; max-height:90px; overflow-y:auto; }
 
@@ -311,9 +334,7 @@
 
 	<div class="container-fluid" style="padding:16px 18px; text-align:left;">
 
-		<!-- Premios por lugar + lugar final por equipo (las 3 tarjetas de
-		     Equipo 1/2/3 se quitaron; la tarjeta de Premios ya trae su
-		     propio título adentro). -->
+		<!-- Dos tarjetas: Premios por lugar + Equipos con su líder, y Rangos de meta. -->
 		<div class="esp-equipos-wrap" id="espEquiposWrap">
 			<div class="esp-vacio" style="grid-column:1/-1;">Cargando equipos...</div>
 		</div>
@@ -327,9 +348,6 @@
 				<select id="espFiltroEquipo" class="esp-filtro-equipo" onchange="filtrarTablaEspartanos()">
 					<option value="">Todos los equipos</option>
 					<option value="sin">Sin asignar</option>
-					<option value="1">Equipo 1</option>
-					<option value="2">Equipo 2</option>
-					<option value="3">Equipo 3</option>
 				</select>
 			</div>
 
@@ -360,16 +378,21 @@
 			</div>
 		</div>
 
-		<!-- Registro de faltas -->
+		<!-- Faltas y retardos -->
 		<div class="esp-card" style="margin-top:18px;">
-			<div class="esp-section-titulo" style="margin-bottom:14px;">🚫 Registro de faltas</div>
+			<div class="esp-section-titulo" style="margin-bottom:14px;">🚫 Faltas y retardos</div>
 
 			<div class="esp-toolbar">
 				<select id="faltaFiltroSemana" class="esp-filtro-equipo" onchange="filtrarTablaFaltas()">
 					<option value="">Todas las semanas</option>
 				</select>
+				<select id="faltaFiltroTipo" class="esp-filtro-equipo" onchange="filtrarTablaFaltas()">
+					<option value="">Faltas y retardos</option>
+					<option value="falta">Solo faltas</option>
+					<option value="retardo">Solo retardos</option>
+				</select>
 				<input type="text" id="faltaBuscador" class="esp-buscador" placeholder="Buscar por nombre o clave..." oninput="filtrarTablaFaltas()">
-				<button type="button" class="btn-esp-primario" onclick="abrirModalFalta()">+ Registrar falta</button>
+				<button type="button" class="btn-esp-primario" onclick="abrirModalFalta()">+ Registrar falta o retardo</button>
 			</div>
 
 			<div class="esp-tabla-wrap">
@@ -378,14 +401,15 @@
 						<tr>
 							<th>Clave</th>
 							<th>Nombre</th>
+							<th>Tipo</th>
 							<th>Semana</th>
-							<th>Día de falta</th>
+							<th>Día</th>
 							<th>Registrado por</th>
 							<th style="width:70px; text-align:center;">Acciones</th>
 						</tr>
 					</thead>
 					<tbody id="faltasTbody">
-						<tr><td colspan="6" class="esp-vacio">Cargando faltas...</td></tr>
+						<tr><td colspan="7" class="esp-vacio">Cargando faltas y retardos...</td></tr>
 					</tbody>
 				</table>
 			</div>
@@ -404,11 +428,7 @@
 				<div class="esp-modal-nombres" id="espModalNombres"></div>
 				<div class="esp-campo">
 					<label>Equipo</label>
-					<div class="esp-equipo-opciones" id="espEquipoOpciones">
-						<div class="esp-equipo-opcion" data-equipo="1" onclick="elegirEquipoModal(1)">Equipo 1</div>
-						<div class="esp-equipo-opcion" data-equipo="2" onclick="elegirEquipoModal(2)">Equipo 2</div>
-						<div class="esp-equipo-opcion" data-equipo="3" onclick="elegirEquipoModal(3)">Equipo 3</div>
-					</div>
+					<div class="esp-equipo-opciones" id="espEquipoOpciones"></div>
 				</div>
 				<div class="esp-campo">
 					<label>Meta individual ($)</label>
@@ -419,6 +439,34 @@
 				<button type="button" class="btn-esp-secundario" id="espBtnQuitar" style="display:none; margin-right:auto;" onclick="quitarAsignacionModal()">Quitar del equipo</button>
 				<button type="button" class="btn-esp-secundario" onclick="cerrarModalAsignar()">Cancelar</button>
 				<button type="button" class="btn-esp-primario" onclick="guardarAsignacionModal()">Guardar</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal: crear / editar equipo (nombre + líder, que es un espartano) -->
+	<div class="esp-modal-overlay" id="espModalEquipo">
+		<div class="esp-modal">
+			<div class="esp-modal-header">
+				<span id="espModalEquipoTitulo">Nuevo equipo</span>
+				<button type="button" onclick="cerrarModalEquipo()">✕</button>
+			</div>
+			<div class="esp-modal-body">
+				<div class="esp-campo">
+					<label>Nombre del equipo</label>
+					<input type="text" id="equipoNombre" maxlength="50" placeholder="Ej. Equipo 4">
+				</div>
+				<div class="esp-campo">
+					<label>Líder</label>
+					<div class="esp-ta-wrapper">
+						<input type="text" id="equipoLiderSearch" placeholder="Buscar por nombre o clave..." autocomplete="off">
+						<div class="esp-ta-dropdown" id="equipoLiderDropdown"></div>
+					</div>
+					<input type="hidden" id="equipoLiderClave" value="">
+				</div>
+			</div>
+			<div class="esp-modal-footer">
+				<button type="button" class="btn-esp-secundario" onclick="cerrarModalEquipo()">Cancelar</button>
+				<button type="button" class="btn-esp-primario" onclick="guardarEquipoModal()">Guardar</button>
 			</div>
 		</div>
 	</div>
@@ -483,11 +531,11 @@
 		</div>
 	</div>
 
-	<!-- Modal: registrar falta -->
+	<!-- Modal: registrar falta o retardo -->
 	<div class="esp-modal-overlay" id="espModalFalta">
 		<div class="esp-modal">
 			<div class="esp-modal-header">
-				<span>🚫 Registrar falta</span>
+				<span>🚫 Registrar falta o retardo</span>
 				<button type="button" onclick="cerrarModalFalta()">✕</button>
 			</div>
 			<div class="esp-modal-body">
@@ -504,7 +552,14 @@
 					<input type="hidden" id="faltaClave" value="">
 				</div>
 				<div class="esp-campo">
-					<label>Día de falta</label>
+					<label>Tipo de incidencia</label>
+					<div class="esp-tipo-opciones" id="faltaTipoOpciones">
+						<div class="esp-tipo-opcion" data-tipo="falta" onclick="elegirTipoFalta('falta')"><span class="esp-tipo-icono">🚫</span>Falta</div>
+						<div class="esp-tipo-opcion" data-tipo="retardo" onclick="elegirTipoFalta('retardo')"><span class="esp-tipo-icono">⏰</span>Retardo</div>
+					</div>
+				</div>
+				<div class="esp-campo">
+					<label>Día de la incidencia</label>
 					<input type="date" id="faltaDia">
 				</div>
 			</div>
@@ -571,14 +626,28 @@
 	var espartanosTodos   = [];   /* último listado que trajo el backend, sin filtrar */
 	var espartanosSeleccionados = new Set(); /* claves marcadas con checkbox */
 	var esAdminEspartanos = false;
-	var equiposActuales   = [];
+	var equiposActuales   = [];   /* ahora son dinámicos: [{id_equipo, nombre, clave (líder), lider_nombre, miembros...}] */
 	var premiosActuales   = { 1:0, 2:0, 3:0 };
 	var rangosPreview     = []; /* copia de solo-lectura para la tarjeta "Rangos de meta" */
-	var faltasTodas       = []; /* último listado de faltas que trajo el backend, sin filtrar */
+	var faltasTodas       = []; /* último listado de faltas/retardos que trajo el backend, sin filtrar */
 	var semanasFaltas     = []; /* semanas válidas (sale de `clawback`, a partir de la 295) */
+	var faltaTipoElegido  = null; /* 'falta' | 'retardo' */
+	var equipoEditando    = 0;    /* id_equipo que se edita en el modal de equipo (0 = nuevo) */
 
 	var LUGAR_LABEL = { 1:'🥇 1er lugar', 2:'🥈 2o lugar', 3:'🥉 3er lugar' };
 	var LUGAR_CLASE = { 1:'esp-lugar-1', 2:'esp-lugar-2', 3:'esp-lugar-3' };
+
+	/* Nombre / badge de un equipo a partir de su id (los nombres vienen
+	   de la tabla espartanos_equipos, ya no se asume "Equipo N"). */
+	function nombreEquipo(id) {
+		var eq = equiposActuales.find(function(e){ return e.id_equipo === id; });
+		return eq ? eq.nombre : ('Equipo ' + id);
+	}
+	function badgeEquipo(id) {
+		if (!id) return '<span class="esp-badge-equipo esp-badge-sin">Sin asignar</span>';
+		var clase = (id >= 1 && id <= 3) ? ('esp-badge-' + id) : 'esp-badge-n';
+		return '<span class="esp-badge-equipo ' + clase + '">' + escaparHtml(nombreEquipo(id)) + '</span>';
+	}
 
 	/* ============================================
 	CARGA INICIAL
@@ -628,7 +697,21 @@
 		equiposActuales   = json.equipos;
 		premiosActuales   = json.premios || { 1:0, 2:0, 3:0 };
 		esAdminEspartanos = !!json.esAdmin;
+		poblarFiltroEquipos();
 		renderEquipos();
+		filtrarTablaEspartanos();   /* para que los badges tomen el nombre actual del equipo */
+	}
+
+	/* El filtro de la tabla se arma con los equipos que existan (ya no
+	   son 3 fijos). Se conserva lo que estuviera seleccionado. */
+	function poblarFiltroEquipos() {
+		var sel = document.getElementById('espFiltroEquipo');
+		var actual = sel.value;
+		sel.innerHTML = '<option value="">Todos los equipos</option><option value="sin">Sin asignar</option>' +
+			equiposActuales.map(function(eq){
+				return '<option value="' + eq.id_equipo + '">' + escaparHtml(eq.nombre) + '</option>';
+			}).join('');
+		sel.value = actual;
 	}
 
 	/* ============================================
@@ -636,10 +719,10 @@
 	============================================ */
 	function renderEquipos() {
 
-		/* Ya no se muestra "Lugar final por equipo" -- eso se va a
-		   definir en automático según cómo vendió cada equipo, no a
-		   mano con un select aquí. Esta tarjeta ahora solo muestra los
-		   3 montos de premio (editable por admin). */
+		/* Una sola tarjeta para Premios por lugar + Equipos con su líder
+		   (el líder es un espartano: espartanos_equipos.clave). Los
+		   premios son 3 montos editables por admin; abajo, una fila por
+		   equipo con su líder, para editarlo o crear un equipo nuevo. */
 		var html = '<div class="esp-premios-card">';
 		html += '<div class="esp-premios-titulo"><span>🏆 Premios por lugar</span>';
 		if (esAdminEspartanos) {
@@ -648,6 +731,25 @@
 		html += '</div>';
 		[1,2,3].forEach(function(l){
 			html += '<div class="esp-premio-row"><label>' + LUGAR_LABEL[l] + '</label><span class="esp-valor">' + formatoMoneda(premiosActuales[l] || 0) + '</span></div>';
+		});
+
+		html += '<div class="esp-premios-titulo" style="margin-top:10px;"><span>👥 Equipos y líderes</span>';
+		if (esAdminEspartanos) {
+			html += '<button type="button" class="btn-esp-mini" onclick="abrirModalEquipo(0)">+ Nuevo</button>';
+		}
+		html += '</div>';
+		if (!equiposActuales.length) {
+			html += '<div class="esp-modal-nombres" style="margin:0;">Todavía no hay equipos.</div>';
+		}
+		equiposActuales.forEach(function(eq){
+			var lider = eq.clave
+				? '<div class="esp-eq-lider">Líder: ' + escaparHtml(eq.lider_nombre || eq.clave) + '</div>'
+				: '<div class="esp-eq-lider sin">Sin líder</div>';
+			html += '<div class="esp-equipo-item"><div><div class="esp-eq-nombre">' + escaparHtml(eq.nombre) + '</div>' + lider + '</div>';
+			if (esAdminEspartanos) {
+				html += '<button type="button" class="btn-esp-mini" onclick="abrirModalEquipo(' + eq.id_equipo + ')">Editar</button>';
+			}
+			html += '</div>';
 		});
 		html += '</div>';
 
@@ -668,6 +770,57 @@
 		html += '</div>';
 
 		document.getElementById('espEquiposWrap').innerHTML = html;
+	}
+
+	/* ── Modal: crear / editar equipo ── */
+	function abrirModalEquipo(idEquipo) {
+
+		equipoEditando = idEquipo || 0;
+		var eq = equipoEditando ? equiposActuales.find(function(e){ return e.id_equipo === equipoEditando; }) : null;
+
+		document.getElementById('espModalEquipoTitulo').textContent = eq ? 'Editar equipo' : 'Nuevo equipo';
+		document.getElementById('equipoNombre').value = eq ? eq.nombre : '';
+
+		/* Líder actual: se muestra su nombre en el buscador y su clave
+		   queda en el hidden (igual que al elegir uno del dropdown). */
+		document.getElementById('equipoLiderClave').value  = (eq && eq.clave) ? eq.clave : '';
+		document.getElementById('equipoLiderSearch').value = (eq && eq.clave) ? (eq.lider_nombre || eq.clave) : '';
+		document.getElementById('equipoLiderDropdown').classList.remove('open');
+		document.getElementById('equipoLiderDropdown').innerHTML = '';
+
+		document.getElementById('espModalEquipo').style.display = 'flex';
+	}
+	function cerrarModalEquipo() {
+		document.getElementById('espModalEquipo').style.display = 'none';
+	}
+
+	async function guardarEquipoModal() {
+
+		var nombre = document.getElementById('equipoNombre').value.trim();
+		var clave  = document.getElementById('equipoLiderClave').value;
+
+		if (!nombre) {
+			Swal.fire({ icon:'warning', title:'Oops', text:'Escribe el nombre del equipo.' });
+			return;
+		}
+		if (!clave) {
+			Swal.fire({ icon:'warning', title:'Oops', text:'Elige al líder del equipo (búscalo y selecciónalo de la lista).' });
+			return;
+		}
+
+		mostrarLoader();
+		try {
+			var json = await apiEsp({ action: 'guardarEquipo', id_equipo: equipoEditando, nombre: nombre, clave: clave });
+			if (json.status !== 'ok') {
+				Swal.fire({ icon:'error', title:'Error', text: json.message || 'No se pudo guardar el equipo.' });
+				return;
+			}
+			cerrarModalEquipo();
+			await cargarEquipos();
+			Swal.fire({ icon:'success', title:'Guardado', timer:1000, showConfirmButton:false });
+		} finally {
+			ocultarLoader();
+		}
 	}
 
 	function abrirModalPremios() {
@@ -892,9 +1045,7 @@
 		var disabledPago = '';
 
 		tbody.innerHTML = lista.map(function(e){
-			var badge = e.id_equipo
-				? '<span class="esp-badge-equipo esp-badge-' + e.id_equipo + '">Equipo ' + e.id_equipo + '</span>'
-				: '<span class="esp-badge-equipo esp-badge-sin">Sin asignar</span>';
+			var badge = badgeEquipo(e.id_equipo);
 			var meta = (e.id_equipo && e.meta_individual !== null) ? formatoMoneda(e.meta_individual) : '—';
 			var marcado = espartanosSeleccionados.has(e.clave) ? ' checked' : '';
 			var claveJs = e.clave.replace(/'/g,"\\'");
@@ -977,6 +1128,13 @@
 	var espModalClaves = []; /* claves sobre las que aplica el modal abierto actualmente */
 	var espModalEquipoElegido = null;
 
+	/* Las opciones salen de los equipos que existan (ya no son 3 fijos). */
+	function renderOpcionesEquipo() {
+		document.getElementById('espEquipoOpciones').innerHTML = equiposActuales.map(function(eq){
+			return '<div class="esp-equipo-opcion" data-equipo="' + eq.id_equipo + '" onclick="elegirEquipoModal(' + eq.id_equipo + ')">' + escaparHtml(eq.nombre) + '</div>';
+		}).join('');
+	}
+
 	function abrirModalAsignar(clavesForzadas) {
 
 		espModalClaves = clavesForzadas && clavesForzadas.length
@@ -999,6 +1157,7 @@
 		});
 		document.getElementById('espModalNombres').textContent = nombres.join(', ');
 
+		renderOpcionesEquipo();
 		elegirEquipoModal((registro && registro.id_equipo) || null);
 		document.getElementById('espModalMeta').value = (registro && registro.meta_individual !== null) ? registro.meta_individual : '';
 
@@ -1081,13 +1240,14 @@
 	}
 
 	/* ============================================
-	REGISTRO DE FALTAS
+	FALTAS Y RETARDOS
 
 	Semana = mismas etiquetas que ya usa el resto del sistema (salen
 	en vivo de `clawback`, a partir de la semana 295), no se
 	inventan aquí. Clave = cualquiera de los espartanos ya cargados
 	en espartanosTodos (no hace falta que ya tenga equipo asignado).
-	Un espartano solo puede tener una falta registrada por día
+	Cada registro es una falta (retardo=0) o un retardo (retardo=1).
+	Un espartano solo puede tener una incidencia registrada por día
 	(lo valida el UNIQUE de la tabla en el backend).
 	============================================ */
 
@@ -1110,7 +1270,7 @@
 		var json = await apiEsp({ action: 'listarFaltas' });
 		if (json.status !== 'ok') {
 			document.getElementById('faltasTbody').innerHTML =
-				'<tr><td colspan="6" class="esp-vacio">' + escaparHtml(json.message || 'No se pudo cargar el registro de faltas.') + '</td></tr>';
+				'<tr><td colspan="7" class="esp-vacio">' + escaparHtml(json.message || 'No se pudo cargar el registro de faltas y retardos.') + '</td></tr>';
 			return;
 		}
 		faltasTodas = json.data;
@@ -1121,11 +1281,13 @@
 
 		var texto  = (document.getElementById('faltaBuscador').value || '').toLowerCase().trim();
 		var semana = document.getElementById('faltaFiltroSemana').value;
+		var tipo   = document.getElementById('faltaFiltroTipo').value;
 
 		var filtradas = faltasTodas.filter(function(f){
 			var coincideTexto = !texto || (f.nombre || '').toLowerCase().indexOf(texto) !== -1 || (f.clave || '').toLowerCase().indexOf(texto) !== -1;
 			var coincideSemana = !semana || f.semana === semana;
-			return coincideTexto && coincideSemana;
+			var coincideTipo = !tipo || (tipo === 'retardo' ? f.retardo : !f.retardo);
+			return coincideTexto && coincideSemana && coincideTipo;
 		});
 
 		renderTablaFaltas(filtradas);
@@ -1136,14 +1298,18 @@
 		var tbody = document.getElementById('faltasTbody');
 
 		if (!lista.length) {
-			tbody.innerHTML = '<tr><td colspan="6" class="esp-vacio">Sin faltas registradas.</td></tr>';
+			tbody.innerHTML = '<tr><td colspan="7" class="esp-vacio">Sin faltas ni retardos registrados.</td></tr>';
 			return;
 		}
 
 		tbody.innerHTML = lista.map(function(f){
+			var tipo = f.retardo
+				? '<span class="esp-badge-equipo esp-badge-retardo">Retardo</span>'
+				: '<span class="esp-badge-equipo esp-badge-falta">Falta</span>';
 			return '<tr>' +
 				'<td>' + escaparHtml(f.clave) + '</td>' +
 				'<td>' + escaparHtml(f.nombre) + '</td>' +
+				'<td>' + tipo + '</td>' +
 				'<td>' + escaparHtml(f.semana) + '</td>' +
 				'<td>' + escaparHtml(f.dia_falta) + '</td>' +
 				'<td>' + escaparHtml(f.registrado_por || '—') + '</td>' +
@@ -1152,6 +1318,13 @@
 				'</td>' +
 				'</tr>';
 		}).join('');
+	}
+
+	function elegirTipoFalta(tipo) {
+		faltaTipoElegido = tipo || null;
+		document.querySelectorAll('#faltaTipoOpciones .esp-tipo-opcion').forEach(function(op){
+			op.classList.toggle('activo', op.dataset.tipo === faltaTipoElegido);
+		});
 	}
 
 	function abrirModalFalta() {
@@ -1165,6 +1338,7 @@
 		document.getElementById('faltaClaveDropdown').classList.remove('open');
 		document.getElementById('faltaClaveDropdown').innerHTML = '';
 
+		elegirTipoFalta(null);
 		document.getElementById('faltaDia').value = '';
 
 		document.getElementById('espModalFalta').style.display = 'flex';
@@ -1176,52 +1350,59 @@
 
 	/* ── Typeahead: buscar espartano por nombre/clave (client-side,
 	   sobre espartanosTodos ya cargado -- coincide con cualquier
-	   parte del nombre o la clave, sin importar mayúsculas/acentos
-	   del acomodo original). ── */
-	(function () {
-		var inpFalta  = document.getElementById('faltaClaveSearch');
-		var dropFalta = document.getElementById('faltaClaveDropdown');
-		if (!inpFalta || !dropFalta) return;
+	   parte del nombre o la clave). Se usa igual para elegir al
+	   espartano de una falta/retardo y al líder de un equipo: al
+	   elegir uno del dropdown, su nombre se queda en el input y su
+	   clave en el campo hidden. ── */
+	function crearTypeahead(idInput, idDropdown, idHidden) {
+
+		var inp  = document.getElementById(idInput);
+		var drop = document.getElementById(idDropdown);
+		var hid  = document.getElementById(idHidden);
+		if (!inp || !drop || !hid) return;
 
 		function normaliza(txt) {
 			return (txt || '').toString().toLowerCase();
 		}
 
-		inpFalta.addEventListener('input', function () {
+		inp.addEventListener('input', function () {
 			var q = normaliza(this.value.trim());
-			document.getElementById('faltaClave').value = '';
+			hid.value = '';
 
-			if (!q) { dropFalta.classList.remove('open'); dropFalta.innerHTML = ''; return; }
+			if (!q) { drop.classList.remove('open'); drop.innerHTML = ''; return; }
 
 			var coincidencias = espartanosTodos.filter(function(e){
 				return normaliza(e.nombre).indexOf(q) !== -1 || normaliza(e.clave).indexOf(q) !== -1;
 			});
 
 			if (!coincidencias.length) {
-				dropFalta.innerHTML = '<div class="esp-ta-vacio">Sin resultados</div>';
+				drop.innerHTML = '<div class="esp-ta-vacio">Sin resultados</div>';
 			} else {
-				dropFalta.innerHTML = coincidencias.map(function(e){
+				drop.innerHTML = coincidencias.map(function(e){
 					return '<div class="esp-ta-item" data-clave="' + escaparHtml(e.clave) + '" data-nombre="' + escaparHtml(e.nombre) + '">' +
 						'<span class="esp-ta-nombre">' + escaparHtml(e.nombre) + '</span>' +
 						'<span class="esp-ta-clave">' + escaparHtml(e.clave) + '</span>' +
 						'</div>';
 				}).join('');
 			}
-			dropFalta.classList.add('open');
+			drop.classList.add('open');
 		});
 
-		dropFalta.addEventListener('mousedown', function (e) {
+		drop.addEventListener('mousedown', function (e) {
 			var item = e.target.closest('.esp-ta-item');
 			if (!item) return;
-			inpFalta.value = item.dataset.nombre;
-			document.getElementById('faltaClave').value = item.dataset.clave;
-			dropFalta.classList.remove('open');
+			inp.value = item.dataset.nombre;
+			hid.value = item.dataset.clave;
+			drop.classList.remove('open');
 		});
 
-		inpFalta.addEventListener('blur', function () {
-			setTimeout(function () { dropFalta.classList.remove('open'); }, 200);
+		inp.addEventListener('blur', function () {
+			setTimeout(function () { drop.classList.remove('open'); }, 200);
 		});
-	})();
+	}
+
+	crearTypeahead('faltaClaveSearch', 'faltaClaveDropdown', 'faltaClave');
+	crearTypeahead('equipoLiderSearch', 'equipoLiderDropdown', 'equipoLiderClave');
 
 	async function guardarFaltaModal() {
 
@@ -1233,8 +1414,12 @@
 			Swal.fire({ icon:'warning', title:'Oops', text:'Elige al espartano.' });
 			return;
 		}
+		if (!faltaTipoElegido) {
+			Swal.fire({ icon:'warning', title:'Oops', text:'Elige si es falta o retardo.' });
+			return;
+		}
 		if (!dia) {
-			Swal.fire({ icon:'warning', title:'Oops', text:'Elige el día de la falta.' });
+			Swal.fire({ icon:'warning', title:'Oops', text:'Elige el día de la incidencia.' });
 			return;
 		}
 		if (!semana) {
@@ -1244,9 +1429,15 @@
 
 		mostrarLoader();
 		try {
-			var json = await apiEsp({ action: 'guardarFalta', clave: clave, dia_falta: dia, semana: semana });
+			var json = await apiEsp({
+				action: 'guardarFalta',
+				clave: clave,
+				dia_falta: dia,
+				semana: semana,
+				retardo: faltaTipoElegido === 'retardo' ? 1 : 0
+			});
 			if (json.status !== 'ok') {
-				Swal.fire({ icon:'error', title:'Error', text: json.message || 'No se pudo registrar la falta.' });
+				Swal.fire({ icon:'error', title:'Error', text: json.message || 'No se pudo registrar la incidencia.' });
 				return;
 			}
 			cerrarModalFalta();
@@ -1260,7 +1451,7 @@
 	async function eliminarFalta(id) {
 
 		var result = await Swal.fire({
-			title: '¿Eliminar esta falta?',
+			title: '¿Eliminar este registro?',
 			icon: 'warning',
 			showCancelButton: true,
 			confirmButtonText: 'Sí, eliminar',
@@ -1273,7 +1464,7 @@
 		try {
 			var json = await apiEsp({ action: 'eliminarFalta', id: id });
 			if (json.status !== 'ok') {
-				Swal.fire({ icon:'error', title:'Error', text: json.message || 'No se pudo eliminar la falta.' });
+				Swal.fire({ icon:'error', title:'Error', text: json.message || 'No se pudo eliminar el registro.' });
 				return;
 			}
 			await cargarFaltas();

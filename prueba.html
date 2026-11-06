@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Costo por puntos — maqueta</title>
+<style>
+	* { box-sizing: border-box; }
+	body { margin: 0; font-family: "Segoe UI", Calibri, Arial, sans-serif; background: #e9edf3; color: #1f2d44; }
+	#contenido, #contenido * { text-align: left; }
+				/* ── "cpt-" = Costo por puntos ── */
+				.cpt-wrap { background:#f4f6fb; border-radius:12px; padding:22px 26px; margin-bottom:18px; }
+				.cpt-top { display:flex; justify-content:flex-end; margin-bottom:4px; }
+				.cpt-seccion { margin-bottom:28px; }
+				.cpt-cab { display:flex; align-items:center; justify-content:space-between; margin:0 0 8px; }
+				.cpt-seccion-titulo { font-size:18px; font-weight:600; color:#2c3e5a; margin:0; }
+				.cpt-nota { font-size:12px; color:#8a96a8; margin-top:6px; }
+				.cpt-vacio { color:#8a96a8; font-size:14px; padding:12px 4px; background:#fff; border:1px dashed #c3cbd8; border-radius:6px; text-align:center !important; }
+
+				.cpt-btn {
+					background:#8fb5e3; border:2px solid #4a78ad; color:#1f3a5c; border-radius:3px;
+					height:38px; min-width:44px; padding:0 14px; font-size:15px; font-weight:600; cursor:pointer;
+				}
+				.cpt-btn:hover { background:#7aa5db; }
+				.cpt-btn.guardar { background:#2874c5; border-color:#1d5a99; color:#fff; font-size:13px; height:32px; padding:0 10px; }
+				.cpt-btn.guardar:hover { background:#1d5fa3; }
+				.cpt-btn.chico { height:32px; font-size:13px; padding:0 10px; min-width:0; }
+				.cpt-btn.quitar { background:#fbeaea; border-color:#c9a0a0; color:#a33; height:32px; font-size:13px; padding:0 10px; min-width:0; }
+
+				.cpt-btn.ok { background:#e8f6ee; border-color:#9cc9aa; color:#2e7d4f; height:32px; font-size:13px; padding:0 10px; min-width:0; }
+
+				/* formulario de captura */
+				.cpt-form { background:#fff; border:1px solid #d3dae5; border-radius:8px; padding:14px 16px 10px; margin-bottom:12px; }
+				.cpt-form-fila { display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; margin-bottom:10px; }
+				.cpt-campo { display:flex; flex-direction:column; }
+				.cpt-campo label { font-size:14px; color:#2c3e5a; margin:0 0 3px 2px; }
+				.cpt-campo.cpt-btns { width:auto; }
+				.cpt-editando { font-size:12.5px; color:#9a6a00; background:#fff6dd; border:1px solid #f0d58a; border-radius:4px; padding:4px 8px; display:inline-block; }
+				.cpt-input {
+					border:2px solid #34495e; background:#fff; color:#2c3e5a; border-radius:3px;
+					height:40px; padding:0 8px; font-size:16px; width:100%; box-sizing:border-box; outline:none;
+					text-align:center !important;
+				}
+				.cpt-input:focus { border-color:#2874c5; box-shadow:0 0 0 3px rgba(40,116,197,.15); }
+
+				/* tablas de registros */
+				.cpt-tabla { width:100%; border-collapse:collapse; background:#fff; font-size:14px; }
+				.cpt-tabla th { background:#1a2f4e; color:#fff; padding:8px 6px; border:1px solid #2b4268; font-weight:600; font-size:13px; text-align:center !important; }
+				.cpt-tabla td { padding:7px 6px; border:1px solid #d3dae5; vertical-align:middle; text-align:center !important; }
+				.cpt-tabla tr.inactiva td { background:#eceff4; color:#8a96a8; }
+				.cpt-tabla tr.editando td { background:#fff6dd; }
+				.cpt-acc { white-space:nowrap; width:1%; }
+				.cpt-estatus { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; }
+				.cpt-estatus.on { background:#e1f3e8; color:#1f7a45; }
+				.cpt-estatus.off { background:#e3e6ec; color:#6b7788; }
+
+				.cpt-badge { font-size:12px; color:#6b7788; margin-left:8px; }
+
+				/* tabulador: editor pivote */
+				.te-wrap { overflow-x:auto; }
+				.te-tabla { width:100%; border-collapse:collapse; background:#fff; table-layout:fixed; font-size:14px; }
+				.te-tabla th { background:#1a2f4e; color:#fff; padding:8px 4px; border:1px solid #2b4268; text-align:center !important; font-weight:600; }
+				.te-tabla td { padding:6px 4px; border:1px solid #d3dae5; text-align:center !important; }
+				.te-tabla th:first-child, .te-tabla td:first-child { width:230px; text-align:left !important; white-space:nowrap; }
+				.te-tabla th.te-ctl, .te-tabla td.te-ctl { width:64px; background:transparent; border:0; }
+				.te-rng { display:flex; align-items:center; gap:4px; }
+				.te-inp { border:1px solid #b5c0d0; border-radius:4px; padding:4px 2px; text-align:center !important; font-size:13px; background:#fff; color:#1f2d44; min-width:0; }
+				.te-rng .te-inp { flex:1 1 0; width:0; }
+				.te-mini { border:1px solid #c9a0a0; background:#fbeaea; color:#a33; border-radius:4px; cursor:pointer; padding:1px 7px; font-size:14px; line-height:1.2; flex:0 0 auto; }
+				.te-mini.ok { border-color:#9cc9aa; background:#e8f6ee; color:#2e7d4f; }
+
+				/* modal tabulador (pantalla completa, solo lectura) */
+				#tabModal { display:none; position:fixed; inset:0; background:rgba(20,30,50,.55); z-index:9999; align-items:center; justify-content:center; padding:20px; }
+				#tabModal.abierto { display:flex; }
+				.tab-card { background:#f5f6fa; border-radius:12px; width:100%; max-width:1100px; max-height:90vh; overflow:auto; padding:46px 28px 28px; position:relative; box-shadow:0 12px 40px rgba(0,0,0,.35); text-align:left; }
+				.tab-x { position:absolute; top:10px; right:16px; border:0; background:none; font-size:26px; cursor:pointer; color:#5a6a82; line-height:1; }
+				#tabTabla { width:100%; border-collapse:separate; border-spacing:0; background:#fff; table-layout:fixed; font-family:"Bahnschrift","Barlow Semi Condensed","Segoe UI",Calibri,Arial,sans-serif; font-size:18px; box-shadow:0 2px 4px rgba(26,47,78,.18); border-right:1px solid #c3c9d2; border-bottom:1px solid #c3c9d2; }
+				#tabTabla th { background:#1a2f4e; color:#fff; padding:16px 12px; text-align:center !important; border-left:1px solid #2b4268; font-weight:700; font-size:19px; }
+				#tabTabla td { padding:14px 12px; text-align:center !important; border-left:1px solid #c3c9d2; border-top:1px solid #c3c9d2; color:#2b3a52; background:#fbfcfe; }
+				#tabTabla th:first-child, #tabTabla td:first-child { width:190px; text-align:left !important; white-space:nowrap; }
+				#tabTabla tr:nth-child(even) td { background:#eef2f6; }
+</style>
+</head>
+<body>
+<div id="contenido">
+	<div class="container-fluid" style="padding:16px 18px; text-align:left;">
+		<div class="cpt-wrap">
+
+			<div class="cpt-top">
+				<button type="button" class="cpt-btn" onclick="tabAbrir()" title="Ver la tabla de tabuladores">📊 Ver tabulador</button>
+			</div>
+
+			<div class="cpt-seccion">
+				<h3 class="cpt-seccion-titulo">Costo por puntos</h3>
+				<div id="frm_n" class="cpt-form"></div>
+				<div id="lst_n"></div>
+				<div class="cpt-nota">Los costos por puntos activos no pueden traslaparse en fechas. Para darlos de baja usa "Desactivar" (borrado lógico): se conservan y se pueden activar de nuevo.</div>
+			</div>
+
+			<div class="cpt-seccion">
+				<h3 class="cpt-seccion-titulo">Campañas especiales</h3>
+				<div id="frm_c" class="cpt-form"></div>
+				<div id="lst_c"></div>
+			</div>
+
+			<div class="cpt-seccion">
+				<div class="cpt-cab"><h3 class="cpt-seccion-titulo">Tabulador de puntos</h3><button type="button" class="cpt-btn chico" onclick="esqNuevo()">+ Nuevo esquema</button></div>
+				<div id="lst_t"></div>
+				<div id="frm_t" class="cpt-form" style="display:none; margin-top:12px"></div>
+				<div class="cpt-nota">Cada esquema es una tabla completa (edades × salarios) con su vigencia. Al modificarlo se edita la tabla entera y "Desactivar" apaga el esquema completo. Dos esquemas activos no pueden traslaparse en fechas.</div>
+			</div>
+
+		</div>
+
+		<div id="tabModal" onclick="if(event.target===this)tabCerrar()">
+			<div class="tab-card">
+				<button type="button" class="tab-x" onclick="tabCerrar()" title="Cerrar">&times;</button>
+				<table id="tabTabla"></table>
+			</div>
+		</div>
+	</div>
+
+</div>
+<script>
+	/* ── Maqueta: API simulada en memoria (en el sistema real esto es costo_puntos_api.php) ── */
+	if(typeof Swal === 'undefined'){
+		window.Swal = { fire: function(a, b){ if(typeof a === 'object'){ if(a.icon !== 'success') alert((a.title || '') + '\n' + (a.text || '')); } else alert(a + '\n' + (b || '')); return Promise.resolve({ isConfirmed:true }); } };
+	}
+	var DB = { sig:100, cpt: [
+		{ id:1, es_campana:0, puntos:70, fec_ini:'2026-10-24', fec_fin:'2026-12-31', salario_ini:'', salario_fin:'', activo:1 },
+		{ id:2, es_campana:0, puntos:80, fec_ini:'2027-01-01', fec_fin:'2050-12-31', salario_ini:'', salario_fin:'', activo:1 },
+		{ id:3, es_campana:1, puntos:85, fec_ini:'2026-11-01', fec_fin:'2026-11-15', salario_ini:10000, salario_fin:20000, activo:1 }
+	], tab: [ {
+		id:1, nombre:'Esquema inicial', fec_ini:'2026-10-24', fec_fin:'2050-12-31', activo:1,
+		edades:[{ini:18,fin:29},{ini:30,fin:39},{ini:40,fin:49},{ini:50,fin:59}],
+		salarios:[{ini:0,fin:10000},{ini:10000,fin:15000},{ini:15000,fin:20000},{ini:20000,fin:30000},{ini:30000,fin:40000},{ini:40000,fin:60000},{ini:60000,fin:null}],
+		puntos:[[5,5,7,11,15,20,40],[10,11,16,25,30,40,60],[15,17,24,38,50,75,85],[17,20,28,44,75,85,100]]
+	} ] };
+	function copia(o){ return JSON.parse(JSON.stringify(o)); }
+	function solapa(id, ini, fin){ return DB.tab.filter(function(e){ return e.activo === 1 && e.id !== id && e.fec_ini <= fin && e.fec_fin >= ini; })[0]; }
+	async function cptApi(p){
+		var f;
+		if(p.action === 'listar') return { ok:true, filas:copia(DB.cpt) };
+		if(p.action === 'listarTabulador') return { ok:true, esquemas:copia(DB.tab) };
+		if(p.action === 'guardar'){
+			if(p.id > 0) f = DB.cpt.filter(function(x){ return x.id === p.id; })[0]; else { f = { id:++DB.sig, activo:1 }; DB.cpt.push(f); }
+			['es_campana','puntos','fec_ini','fec_fin','salario_ini','salario_fin'].forEach(function(k){ f[k] = p[k]; });
+			['puntos','salario_ini','salario_fin'].forEach(function(k){ if(f[k] !== '' && f[k] !== undefined) f[k] = Number(f[k]); });
+			return { ok:true, id:f.id };
+		}
+		if(p.action === 'toggleActivo'){ f = DB.cpt.filter(function(x){ return x.id === p.id; })[0]; if(f) f.activo = p.activo; return { ok:true }; }
+		if(p.action === 'guardarTabulador'){
+			var c = solapa(p.id, p.fec_ini, p.fec_fin);
+			var act = p.id > 0 ? DB.tab.filter(function(x){ return x.id === p.id; })[0].activo : 1;
+			if(act === 1 && c) return { ok:false, msg:'Se traslapa con el esquema "' + c.nombre + '". Ajusta las fechas o desactiva ese esquema.' };
+			if(p.id > 0) f = DB.tab.filter(function(x){ return x.id === p.id; })[0]; else { f = { id:++DB.sig, activo:1 }; DB.tab.push(f); }
+			f.nombre = p.nombre; f.fec_ini = p.fec_ini; f.fec_fin = p.fec_fin;
+			f.edades = p.edades.map(function(e){ return { ini:Number(e.ini), fin:Number(e.fin) }; });
+			f.salarios = p.salarios.map(function(s){ return { ini:Number(s.ini), fin:(s.fin === null || s.fin === '') ? null : Number(s.fin) }; });
+			f.puntos = p.puntos.map(function(r){ return r.map(Number); });
+			return { ok:true, id:f.id };
+		}
+		if(p.action === 'toggleTabulador'){
+			f = DB.tab.filter(function(x){ return x.id === p.id; })[0];
+			if(p.activo === 1){ var c2 = solapa(p.id, f.fec_ini, f.fec_fin); if(c2) return { ok:false, msg:'No se puede activar: se traslapa con "' + c2.nombre + '".' }; }
+			f.activo = p.activo; return { ok:true };
+		}
+		return { ok:false, msg:'Acción no reconocida' };
+	}
+
+	/* ══════════ Costo por puntos y campañas: formulario arriba, tabla abajo ══════════ */
+	var CPT = { cpt: [], tab: [] };    // tab = esquemas del tabulador, cada uno con su matriz {edades, salarios, puntos}
+	var EDIT = { n:0, c:0 };           // id que se está modificando en cada formulario (0 = alta)
+	var TE = null;                     // esquema del tabulador que se está capturando / editando
+
+	var C_DEL = { k:'fec_ini', l:'Del', t:'date', w:160 }, C_AL = { k:'fec_fin', l:'Al', t:'date', w:160 }, C_PTS = { k:'puntos', l:'Puntos', t:'int', w:100 };
+	var GRUPOS = {
+		n: { es:0, aG:'guardar', aT:'toggleActivo', cols:[ C_DEL, C_AL, C_PTS ], form:[ ['fec_ini','fec_fin','puntos'] ] },
+		c: { es:1, aG:'guardar', aT:'toggleActivo',
+		     cols:[ C_DEL, C_AL, { k:'salario_ini', l:'Salario inicial', t:'dec', w:150 }, { k:'salario_fin', l:'Salario final', t:'dec', w:150 }, C_PTS ],
+		     form:[ ['fec_ini','fec_fin','salario_ini','salario_fin','puntos'] ] }
+	};
+
+	function esc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+	function mostrarLoaderCpt(){ var l = document.getElementById('loader'); if(l) l.style.display = 'flex'; }
+	function ocultarLoaderCpt(){ var l = document.getElementById('loader'); if(l) l.style.display = 'none'; }
+	function fmtF(s){ return s ? String(s).split('-').reverse().join('/') : ''; }
+	function fmtN(n){ return (n === '' || n === null || n === undefined) ? '' : Number(n).toLocaleString('es-MX'); }
+	function hoyISO(){ var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+	function colDe(g, k){ return GRUPOS[g].cols.filter(function(c){ return c.k === k; })[0]; }
+	function el(g, k){ return document.getElementById('f_' + g + '_' + k); }
+	function grpFilas(g){ return CPT.cpt.filter(function(f){ return f.es_campana === GRUPOS[g].es; }); }
+	function cptBuscar(id){ return CPT.cpt.filter(function(f){ return f.id === id; })[0]; }
+
+	async function cptCargar(){
+		mostrarLoaderCpt();
+		var r1 = await cptApi({ action:'listar' });
+		var r2 = await cptApi({ action:'listarTabulador' });
+		ocultarLoaderCpt();
+		if(!r1.ok) Swal.fire('Error', r1.msg || 'No se pudo cargar.', 'error');
+		if(!r2.ok) Swal.fire('Tabulador', r2.msg || 'No se pudo cargar el tabulador.', 'warning');
+		CPT.cpt = r1.filas || [];
+		CPT.tab = r2.esquemas || [];
+		pintarLista('n'); pintarLista('c'); pintarEsquemas();
+	}
+
+	function pintarForm(g){
+		var G = GRUPOS[g], cont = document.getElementById('frm_' + g), h = '';
+		if(!cont) return;
+		G.form.forEach(function(fila, i){
+			h += '<div class="cpt-form-fila">';
+			fila.forEach(function(k){
+				var c = colDe(g, k), tipo = c.t === 'date' ? 'date' : 'text';
+				var extra = c.t === 'int' ? ' inputmode="numeric" maxlength="9"' : (c.t === 'dec' ? ' inputmode="decimal"' : '');
+				h += '<div class="cpt-campo" style="width:' + c.w + 'px"><label>' + esc(c.l) + '</label>' +
+				     '<input class="cpt-input" id="f_' + g + '_' + k + '" type="' + tipo + '"' + extra +
+				     ' oninput="cptFiltro(\'' + g + '\',\'' + k + '\',this)"></div>';
+			});
+			if(i === G.form.length - 1){
+				h += '<div class="cpt-campo cpt-btns"><label>&nbsp;</label><div>' +
+				     '<button type="button" class="cpt-btn" id="btn_' + g + '" title="Agregar" onclick="cptEnviar(\'' + g + '\')">+</button> ' +
+				     '<button type="button" class="cpt-btn chico" id="can_' + g + '" style="display:none" onclick="cptCancelar(\'' + g + '\')">Cancelar</button></div></div>';
+			}
+			h += '</div>';
+		});
+		h += '<div class="cpt-editando" id="ed_' + g + '" style="display:none"></div>';
+		cont.innerHTML = h;
+		cont.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); cptEnviar(g); } });
+	}
+	function cptFiltro(g, k, input){
+		var c = colDe(g, k), v = input.value;
+		if(c.t === 'int'){ v = v.replace(/\D/g, ''); if(input.value !== v) input.value = v; }
+		if(c.t === 'dec'){ v = v.replace(/[^0-9.]/g, ''); if(input.value !== v) input.value = v; }
+	}
+
+	function pintarLista(g){
+		var G = GRUPOS[g], filas = grpFilas(g), cont = document.getElementById('lst_' + g);
+		if(!cont) return;
+		if(!filas.length){ cont.innerHTML = '<div class="cpt-vacio">Aún no hay registros.</div>'; return; }
+		var h = '<table class="cpt-tabla"><thead><tr>';
+		G.cols.forEach(function(c){ h += '<th>' + esc(c.l) + '</th>'; });
+		h += '<th>Estatus</th><th>Acciones</th></tr></thead><tbody>';
+		filas.forEach(function(f){
+			h += '<tr class="' + (f.activo ? '' : 'inactiva') + (EDIT[g] === f.id ? ' editando' : '') + '">';
+			G.cols.forEach(function(c){
+				var v = f[c.k];
+				if(c.t === 'date') v = fmtF(v);
+				else if(c.t === 'dec') v = (v === '' || v === null) ? '' : '$' + fmtN(v);
+				else if(c.t === 'int') v = fmtN(v);
+				h += '<td>' + esc(v) + '</td>';
+			});
+			h += '<td><span class="cpt-estatus ' + (f.activo ? 'on' : 'off') + '">' + (f.activo ? 'Activo' : 'Inactivo') + '</span></td>';
+			h += '<td class="cpt-acc"><button class="cpt-btn chico" onclick="cptModificar(\'' + g + '\',' + f.id + ')">Modificar</button> ' +
+			     '<button class="cpt-btn chico ' + (f.activo ? 'quitar' : 'ok') + '" onclick="cptToggle(\'' + g + '\',' + f.id + ',' + (f.activo ? 0 : 1) + ')">' + (f.activo ? 'Desactivar' : 'Activar') + '</button></td>';
+			h += '</tr>';
+		});
+		cont.innerHTML = h + '</tbody></table>';
+	}
+
+	function cptModoEdicion(g, f){
+		EDIT[g] = f ? f.id : 0;
+		document.getElementById('btn_' + g).textContent = f ? 'Guardar' : '+';
+		document.getElementById('btn_' + g).title = f ? 'Guardar cambios' : 'Agregar';
+		document.getElementById('can_' + g).style.display = f ? '' : 'none';
+		var ed = document.getElementById('ed_' + g);
+		ed.style.display = f ? '' : 'none';
+		ed.textContent = f ? 'Modificando un registro existente. Guarda los cambios o cancela.' : '';
+		pintarLista(g);
+	}
+	function cptModificar(g, id){
+		var f = cptBuscar(id), G = GRUPOS[g];
+		if(!f) return;
+		G.cols.forEach(function(c){ el(g, c.k).value = (f[c.k] === null || f[c.k] === undefined) ? '' : f[c.k]; });
+		cptModoEdicion(g, f);
+		el(g, G.form[0][0]).scrollIntoView({ behavior:'smooth', block:'center' });
+	}
+	function cptCancelar(g){
+		GRUPOS[g].cols.forEach(function(c){ el(g, c.k).value = ''; });
+		cptModoEdicion(g, null);
+	}
+
+	function cptValidar(g, f){
+		if(!f.fec_ini || !f.fec_fin) return 'Captura las fechas inicial y final.';
+		if(f.fec_fin < f.fec_ini) return 'La fecha final no puede ser anterior a la inicial.';
+		if(g === 'c'){
+			var si = parseFloat(f.salario_ini), sf = parseFloat(f.salario_fin);
+			if(isNaN(si) || isNaN(sf) || si < 0 || sf < 0) return 'La campaña especial necesita salario inicial y final.';
+			if(si > sf) return 'El salario inicial no puede ser mayor al final.';
+		}
+		if(!/^\d+$/.test(String(f.puntos))) return 'Los puntos deben ser un número entero no negativo.';
+		return '';
+	}
+
+	async function cptEnviar(g){
+		var G = GRUPOS[g], f = {}, p = { action:G.aG, id:EDIT[g], es_campana:G.es };
+		G.cols.forEach(function(c){ f[c.k] = el(g, c.k).value.trim(); p[c.k] = f[c.k]; });
+		var err = cptValidar(g, f);
+		if(err){ Swal.fire('Revisa los datos', err, 'warning'); return; }
+		mostrarLoaderCpt();
+		var r = await cptApi(p);
+		ocultarLoaderCpt();
+		if(!r.ok){ Swal.fire('No se guardó', r.msg || '', 'error'); return; }
+		await cptCargar();
+		cptCancelar(g);
+		Swal.fire({ icon:'success', title:'Guardado', timer:1000, showConfirmButton:false });
+	}
+
+	async function cptToggle(g, id, nuevo){
+		var f = cptBuscar(id);
+		if(!f) return;
+		var r = await cptApi({ action:GRUPOS[g].aT, id:id, activo:nuevo });
+		if(!r.ok){ Swal.fire('No se pudo cambiar', r.msg || '', 'error'); return; }
+		f.activo = nuevo;
+		pintarLista(g);
+	}
+
+	/* ══════════ Tabulador: una tabla pivote por esquema (salarios = columnas, edades = renglones) ══════════ */
+	function tabMoney(n){ n = Number(n); return (n % 1000 === 0 && n !== 0) ? '$' + (n / 1000) + 'k' : '$' + n.toLocaleString('es-MX'); }
+	function tabEtiqSal(ini, fin){
+		if(fin === null || fin === '') return tabMoney(ini) + ' o más';
+		if(Number(ini) === 0) return 'Hasta ' + tabMoney(fin);
+		return tabMoney(ini) + '–' + tabMoney(fin);
+	}
+	function esqBuscar(id){ return CPT.tab.filter(function(e){ return e.id === id; })[0]; }
+	function esqClon(e){ return JSON.parse(JSON.stringify(e)); }
+
+	/* lista de esquemas */
+	function pintarEsquemas(){
+		var cont = document.getElementById('lst_t');
+		if(!cont) return;
+		if(!CPT.tab.length){ cont.innerHTML = '<div class="cpt-vacio">Aún no hay esquemas. Pulsa "+ Nuevo esquema".</div>'; return; }
+		var h = '<table class="cpt-tabla"><thead><tr><th>Esquema</th><th>Fecha inicial</th><th>Fecha final</th><th>Edades</th><th>Salarios</th><th>Estatus</th><th>Acciones</th></tr></thead><tbody>';
+		CPT.tab.forEach(function(e){
+			h += '<tr class="' + (e.activo ? '' : 'inactiva') + (TE && TE.id === e.id ? ' editando' : '') + '"><td>' + esc(e.nombre) + '</td><td>' + fmtF(e.fec_ini) + '</td><td>' + fmtF(e.fec_fin) + '</td>' +
+			     '<td>' + e.edades.length + '</td><td>' + e.salarios.length + '</td>' +
+			     '<td><span class="cpt-estatus ' + (e.activo ? 'on' : 'off') + '">' + (e.activo ? 'Activo' : 'Inactivo') + '</span></td>' +
+			     '<td class="cpt-acc"><button class="cpt-btn chico" onclick="tabAbrir(' + e.id + ')">Ver</button> ' +
+			     '<button class="cpt-btn chico" onclick="esqModificar(' + e.id + ')">Modificar</button> ' +
+			     '<button class="cpt-btn chico" onclick="esqDuplicar(' + e.id + ')">Duplicar</button> ' +
+			     '<button class="cpt-btn chico ' + (e.activo ? 'quitar' : 'ok') + '" onclick="esqToggle(' + e.id + ',' + (e.activo ? 0 : 1) + ')">' + (e.activo ? 'Desactivar' : 'Activar') + '</button></td></tr>';
+		});
+		cont.innerHTML = h + '</tbody></table>';
+	}
+	async function esqToggle(id, nuevo){
+		var r = await cptApi({ action:'toggleTabulador', id:id, activo:nuevo });
+		if(!r.ok){ Swal.fire('No se pudo cambiar', r.msg || '', 'error'); return; }
+		var e = esqBuscar(id); if(e) e.activo = nuevo;
+		pintarEsquemas();
+	}
+
+	/* editor (pivote editable) */
+	function esqNuevo(){
+		TE = { id:0, nombre:'', fec_ini:'', fec_fin:'', edades:[{ ini:18, fin:29 }], salarios:[{ ini:0, fin:null }], puntos:[[0]] };
+		pintarEditor(); pintarEsquemas();
+	}
+	function esqModificar(id){ var e = esqBuscar(id); if(!e) return; TE = esqClon(e); pintarEditor(); pintarEsquemas(); }
+	function esqDuplicar(id){
+		var e = esqBuscar(id); if(!e) return;
+		TE = esqClon(e); TE.id = 0; TE.nombre = 'Copia de ' + e.nombre;
+		pintarEditor(); pintarEsquemas();
+	}
+	function esqCancelar(){ TE = null; pintarEditor(); pintarEsquemas(); }
+
+	function teInp(cls, v, extra){ return '<input class="te-inp ' + cls + '" value="' + esc(v) + '" ' + (extra || '') + '>'; }
+
+	function pintarEditor(){
+		var host = document.getElementById('frm_t'), d = TE;
+		if(!host) return;
+		if(!d){ host.innerHTML = ''; host.style.display = 'none'; return; }
+		host.style.display = '';
+		var h = '<div class="cpt-editando" style="display:inline-block;margin-bottom:10px">' + (d.id ? 'Modificando el esquema completo' : 'Nuevo esquema') + '</div>';
+		h += '<div class="cpt-form-fila">' +
+		     '<div class="cpt-campo" style="width:300px"><label>Nombre del esquema</label><input class="cpt-input" id="te_nombre" maxlength="100" value="' + esc(d.nombre) + '"></div>' +
+		     '<div class="cpt-campo" style="width:160px"><label>Fecha inicial</label><input class="cpt-input" type="date" id="te_fi" value="' + esc(d.fec_ini) + '"></div>' +
+		     '<div class="cpt-campo" style="width:160px"><label>Fecha final</label><input class="cpt-input" type="date" id="te_ff" value="' + esc(d.fec_fin) + '"></div></div>';
+		h += '<div class="te-wrap"><table class="te-tabla" id="teTabla"><tr><th>Edad \\ Salario</th>';
+		d.salarios.forEach(function(s, j){
+			h += '<th><div class="te-rng">' + teInp('t-si', s.ini, 'data-j="' + j + '" inputmode="decimal"') + '<span>–</span>' +
+			     teInp('t-sf', s.fin === null ? '' : s.fin, 'data-j="' + j + '" inputmode="decimal" placeholder="∞"') +
+			     (d.salarios.length > 1 ? '<button type="button" class="te-mini" title="Quitar este salario (afecta todas las edades)" onclick="teQuitarCol(' + j + ')">×</button>' : '') + '</div></th>';
+		});
+		h += '<th class="te-ctl"><button type="button" class="te-mini ok" title="Agregar salario (afecta todas las edades)" onclick="teAgregarCol()">+</button></th></tr>';
+		d.edades.forEach(function(e, i){
+			h += '<tr><td>' + teInp('t-ei', e.ini, 'data-i="' + i + '" inputmode="numeric" style="width:48px"') + ' – ' + teInp('t-ef', e.fin, 'data-i="' + i + '" inputmode="numeric" style="width:48px"') + ' años' +
+			     (d.edades.length > 1 ? ' <button type="button" class="te-mini" title="Quitar esta edad (afecta todos los salarios)" onclick="teQuitarFila(' + i + ')">×</button>' : '') + '</td>';
+			d.salarios.forEach(function(s, j){ h += '<td>' + teInp('t-p', d.puntos[i][j], 'data-i="' + i + '" data-j="' + j + '" inputmode="numeric" style="width:70px"') + '</td>'; });
+			h += '<td class="te-ctl"></td></tr>';
+		});
+		h += '<tr><td class="te-ctl" style="text-align:left !important"><button type="button" class="te-mini ok" title="Agregar edad (afecta todos los salarios)" onclick="teAgregarFila()">+ edad</button></td></tr></table></div>';
+		h += '<div class="cpt-nota">Cada salario aplica a todas las edades y cada edad a todos los salarios. El salario inicial se incluye y el final no; final vacío = "o más" (solo la última columna).</div>';
+		h += '<div style="margin-top:12px;display:flex;gap:10px"><button type="button" class="cpt-btn" onclick="esqGuardar()">Guardar esquema</button><button type="button" class="cpt-btn" onclick="esqCancelar()">Cancelar</button></div>';
+		host.innerHTML = h;
+		host.scrollIntoView({ behavior:'smooth', block:'nearest' });
+	}
+	function teLeer(){
+		var q = function(c){ return document.querySelectorAll('#frm_t .' + c); };
+		TE.nombre = document.getElementById('te_nombre').value.trim();
+		TE.fec_ini = document.getElementById('te_fi').value;
+		TE.fec_fin = document.getElementById('te_ff').value;
+		q('t-ei').forEach(function(x){ TE.edades[x.dataset.i].ini = x.value.trim(); });
+		q('t-ef').forEach(function(x){ TE.edades[x.dataset.i].fin = x.value.trim(); });
+		q('t-si').forEach(function(x){ TE.salarios[x.dataset.j].ini = x.value.trim(); });
+		q('t-sf').forEach(function(x){ TE.salarios[x.dataset.j].fin = x.value.trim() === '' ? null : x.value.trim(); });
+		q('t-p').forEach(function(x){ TE.puntos[x.dataset.i][x.dataset.j] = x.value.trim(); });
+	}
+	function teAgregarFila(){
+		teLeer();
+		var u = TE.edades[TE.edades.length - 1], ini = u ? (parseInt(u.fin, 10) || 0) + 1 : 18;
+		TE.edades.push({ ini:ini, fin:ini + 9 });
+		TE.puntos.push(TE.salarios.map(function(){ return 0; }));
+		pintarEditor();
+	}
+	function teQuitarFila(i){ teLeer(); TE.edades.splice(i, 1); TE.puntos.splice(i, 1); pintarEditor(); }
+	function teAgregarCol(){
+		teLeer();
+		var u = TE.salarios[TE.salarios.length - 1];
+		if(u && u.fin === null) u.fin = Number(u.ini) + 10000;      // la que estaba abierta se cierra
+		TE.salarios.push({ ini:u ? Number(u.fin) : 0, fin:null });
+		TE.puntos.forEach(function(f){ f.push(0); });
+		pintarEditor();
+	}
+	function teQuitarCol(j){ teLeer(); TE.salarios.splice(j, 1); TE.puntos.forEach(function(f){ f.splice(j, 1); }); pintarEditor(); }
+
+	function esqValidar(d){
+		var i, j, prev = -1, pf = null, n = d.salarios.length;
+		if(!d.nombre) return 'Captura el nombre del esquema.';
+		if(!d.fec_ini || !d.fec_fin) return 'Captura las fechas inicial y final.';
+		if(d.fec_fin < d.fec_ini) return 'La fecha final no puede ser anterior a la inicial.';
+		for(i = 0; i < d.edades.length; i++){
+			var a = parseInt(d.edades[i].ini, 10), b = parseInt(d.edades[i].fin, 10);
+			if(isNaN(a) || isNaN(b)) return 'Edad ' + (i + 1) + ': captura edades numéricas.';
+			if(b < a) return 'Edad ' + (i + 1) + ': la edad final no puede ser menor a la inicial.';
+			if(a <= prev) return 'Edad ' + (i + 1) + ': los rangos de edad no pueden traslaparse ni ir desordenados.';
+			prev = b;
+		}
+		for(j = 0; j < n; j++){
+			var si = Number(d.salarios[j].ini), sf = d.salarios[j].fin === null ? null : Number(d.salarios[j].fin);
+			if(String(d.salarios[j].ini) === '' || isNaN(si) || si < 0) return 'Salario ' + (j + 1) + ': salario inicial inválido.';
+			if(sf === null && j !== n - 1) return 'Salario ' + (j + 1) + ': solo el último puede quedar abierto ("o más").';
+			if(sf !== null && (isNaN(sf) || sf <= si)) return 'Salario ' + (j + 1) + ': el final debe ser mayor al inicial.';
+			if(pf !== null && si < pf) return 'Salario ' + (j + 1) + ': los rangos de salario no pueden traslaparse ni ir desordenados.';
+			pf = sf;
+		}
+		for(i = 0; i < d.puntos.length; i++) for(j = 0; j < n; j++){
+			if(!/^\d{1,9}$/.test(String(d.puntos[i][j]))) return 'Puntos inválidos en la edad ' + (i + 1) + ', salario ' + (j + 1) + ' (entero no negativo).';
+		}
+		return '';
+	}
+	async function esqGuardar(){
+		teLeer();
+		var err = esqValidar(TE);
+		if(err){ Swal.fire('Revisa los datos', err, 'warning'); return; }
+		mostrarLoaderCpt();
+		var r = await cptApi({ action:'guardarTabulador', id:TE.id, nombre:TE.nombre, fec_ini:TE.fec_ini, fec_fin:TE.fec_fin, edades:TE.edades, salarios:TE.salarios, puntos:TE.puntos });
+		ocultarLoaderCpt();
+		if(!r.ok){ Swal.fire('No se guardó', r.msg || '', 'error'); return; }
+		TE = null;
+		await cptCargar();
+		pintarEditor();
+		Swal.fire({ icon:'success', title:'Esquema guardado', timer:1100, showConfirmButton:false });
+	}
+
+	/* modal: solo la tabla */
+	function tabEsquemaVigente(){
+		var hoy = hoyISO(), act = CPT.tab.filter(function(e){ return e.activo === 1; }), i;
+		for(i = 0; i < act.length; i++) if(act[i].fec_ini <= hoy && act[i].fec_fin >= hoy) return act[i];
+		return act[0] || null;
+	}
+	function tabAbrir(id){
+		tabPintar(id ? esqBuscar(id) : tabEsquemaVigente());
+		document.getElementById('tabModal').classList.add('abierto');
+	}
+	function tabPintar(e){
+		var tabla = document.getElementById('tabTabla');
+		if(!e){ tabla.innerHTML = '<tr><td style="text-align:center !important">No hay un esquema activo.</td></tr>'; return; }
+		var h = '<tr><th>Edad \\ Salario</th>' + e.salarios.map(function(s){ return '<th>' + esc(tabEtiqSal(s.ini, s.fin)) + '</th>'; }).join('') + '</tr>';
+		e.edades.forEach(function(a, i){
+			h += '<tr><td>' + a.ini + '–' + a.fin + ' años</td>' + e.salarios.map(function(s, j){ return '<td>' + e.puntos[i][j] + '</td>'; }).join('') + '</tr>';
+		});
+		tabla.innerHTML = h;
+	}
+	function tabCerrar(){ document.getElementById('tabModal').classList.remove('abierto'); }
+	document.addEventListener('keydown', function(e){ if(e.key === 'Escape') tabCerrar(); });
+
+	['n','c'].forEach(pintarForm);
+	cptCargar();
+</script>
+</body>
+</html>

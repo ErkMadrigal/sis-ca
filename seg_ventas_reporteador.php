@@ -1216,7 +1216,7 @@
 				/* --- Datos propios del reporteador (no vienen en la plantilla base) --- */
 				$conecta = new conector();
 				$nombre  = $_SESSION["nombre"];
-				$nivel   = nivel_usuario(utf8_decode($nombre));
+				$nivel   = nivelReporteador($conecta, utf8_decode($nombre));
 				$esAdmin = ($nivel == 12);
 
 				$queryClave = "Select clave from empl_usuarios where nombre='" . mysqli_real_escape_string($conecta->conexion, utf8_decode($nombre)) . "'";
@@ -1266,6 +1266,11 @@
 
 								<div class="mc-header">
 									<h2>📊 Reporteador de Ventas</h2>
+									<span id="svCacheChip" title="Los datos se precalculan en segundo plano para que el reporte salga en segundos" style="margin-left:14px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:14px;background:rgba(255,255,255,.18);white-space:nowrap;">⚡ ...</span>
+									<?php if ($esAdmin): ?>
+									<label style="margin-left:8px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;" title="Ignorar la caché y calcular en vivo (lento)"><input type="checkbox" id="svEnVivo"> En vivo</label>
+									<button class="mc-btn-close" onclick="refrescarCacheAhora()" id="svBtnRefrescar" title="Actualizar datos ahora (segundo plano)" style="margin-left:4px;">⟳</button>
+									<?php endif; ?>
 									<?php if ($esAdmin): ?>
 									<button class="mc-btn-close" onclick="abrirModalPermisos()" title="Permisos de campos sensibles" style="margin-right:6px;">⚙️</button>
 									<?php endif; ?>
@@ -1580,8 +1585,83 @@
 	INIT
 	============================================ */
 
+	/* ── ⚡ Estado de la caché precalculada ── */
+	var svPollTimer = null;
+
+	function svFmtFecha(dt){          /* '2026-10-11 14:32:05' -> '11/10 14:32' */
+		if(!dt) return '';
+		var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(dt);
+		return m ? (m[3] + '/' + m[2] + ' ' + m[4] + ':' + m[5]) : dt;
+	}
+
+	function svPintarChip(c){
+		var chip = document.getElementById('svCacheChip');
+		if(!chip) return;
+		if(!c || c.estado === 'vacio' || !c.refreshed_at){
+			chip.textContent = (c && c.estado === 'refrescando') ? '🔄 Preparando datos…' : '⚡ Datos aún no precalculados';
+			return;
+		}
+		if(c.estado === 'refrescando'){
+			chip.textContent = '🔄 Actualizando… (datos al ' + svFmtFecha(c.refreshed_at) + ')';
+		}else{
+			var min = parseInt(c.edad_min, 10) || 0;
+			var hace = min < 1 ? 'hace instantes' : (min < 60 ? 'hace ' + min + ' min' : 'hace ' + Math.floor(min/60) + ' h');
+			chip.textContent = '⚡ Datos al ' + svFmtFecha(c.refreshed_at) + ' · ' + hace;
+		}
+	}
+
+	function svMarcarOrigen(origen, cacheAt){
+		var chip = document.getElementById('svCacheChip');
+		if(!chip) return;
+		if(origen === 'cache' && cacheAt){
+			chip.textContent = '⚡ Instantáneo · datos al ' + svFmtFecha(cacheAt);
+		}else if(origen === 'vivo'){
+			chip.textContent = '🐢 En vivo (se está precalculando para la próxima)';
+			setTimeout(svCargarEstadoCache, 4000);
+		}
+	}
+
+	async function svCargarEstadoCache(){
+		try{
+			var res  = await fetch(API_REPORTEADOR, {
+				method:'POST', headers:{'Content-Type':'application/json'},
+				body: JSON.stringify({ action:'estadoCache' })
+			});
+			var json = await res.json();
+			if(json.status === 'ok'){
+				svPintarChip(json.cache);
+				clearTimeout(svPollTimer);
+				if(json.cache && json.cache.estado === 'refrescando'){
+					svPollTimer = setTimeout(svCargarEstadoCache, 4000);   /* sigue preguntando mientras trabaja */
+				}
+			}
+		}catch(e){ /* sin ruido: es solo informativo */ }
+	}
+
+	async function refrescarCacheAhora(){
+		var btn = document.getElementById('svBtnRefrescar');
+		if(btn) btn.disabled = true;
+		try{
+			var res  = await fetch(API_REPORTEADOR, {
+				method:'POST', headers:{'Content-Type':'application/json'},
+				body: JSON.stringify({ action:'refrescarCache' })
+			});
+			var json = await res.json();
+			if(json.status !== 'ok'){
+				Swal.fire({ icon:'error', title:'No se pudo actualizar', text: json.message || '' });
+			}else{
+				document.getElementById('svCacheChip').textContent = '🔄 Actualizando…';
+				setTimeout(svCargarEstadoCache, 2500);
+			}
+		}catch(e){
+			Swal.fire({ icon:'error', title:'Error', text:'No se pudo iniciar la actualización.' });
+		}
+		if(btn) btn.disabled = false;
+	}
+
 	document.addEventListener('DOMContentLoaded', function(){
 
+		svCargarEstadoCache();
 		pintarConfigsGuardadas();
 
 		document.getElementById('mcBuscarCampo').addEventListener('input', function(){
@@ -1621,6 +1701,16 @@
 
 			if(filtroTipoActivo === 'Folio'){
 				filtroValor = termino ? { etiqueta: termino, valor: termino } : null;
+				return;
+			}
+
+			/* Solo admin: "todos"/"todas" = sin filtro estructural (solo rango de fechas). El servidor lo vuelve a validar. */
+			var tl = termino.toLowerCase();
+			if(ES_ADMIN && (tl === 'todos' || tl === 'todas')){
+				filtroValor = { etiqueta: 'TODOS', valor: 'TODOS' };
+				renderChipFiltro();
+				this.value = '';
+				document.getElementById('mfDropdown').style.display = 'none';
 				return;
 			}
 
@@ -2411,6 +2501,7 @@
 			sfp:     (!esFolio && document.getElementById('mfSfp').checked) ? 1 : 0,
 			srm0:    (!esFolio && document.getElementById('mfSrm0').checked) ? 1 : 0,
 			reg_esp: (!esFolio && document.getElementById('mfRegEsp').checked) ? 1 : 0,
+			en_vivo: (document.getElementById('svEnVivo') && document.getElementById('svEnVivo').checked) ? 1 : 0,
 			/* Folio pide TODOS los campos de una sola vez (los de la
 			   tabla Y los de la ficha). El backend de Folio ya es lento
 			   de por sí (ver obtenerDatosReporte) -- antes se disparaba
@@ -2441,6 +2532,8 @@
 				Swal.fire({ icon:'error', title:'Error', text:json.message || json.mysql || 'No se pudo generar el reporte' });
 				return;
 			}
+
+			svMarcarOrigen(json.origen, json.cache_at);
 
 			if(esFolio && json.data && json.data.length > 0){
 

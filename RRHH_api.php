@@ -501,6 +501,365 @@ if ($action === 'guardarEmpleado') {
 }
 
 /* ════════════════════════════════════════════════════════════
+   ACTION: importarEmpleadosMasivo
+   Alta masiva de empleados desde un xlsx parseado en el navegador
+   (mismo patrón que qualitas_api.php: el archivo se lee con SheetJS
+   del lado del cliente, aquí solo llega el arreglo de filas ya
+   parseadas -- $input['filas']).
+
+   Por cada fila se repite, en el mismo orden, todo lo que hace el
+   alta individual (guardarEmpleado arriba) más los datos extra que
+   sí trae el xlsx y el formulario de alta normal no captura de una
+   sola vez (banco, nivel, estructura/gerencia, contacto de
+   emergencia). Los ÚNICOS datos obligatorios por fila son
+   nombres + apellido paterno + apellido materno + correo -- clave y
+   contraseña se generan solas, igual que en el alta individual; todo
+   lo demás es opcional y si falta o no hace match contra su catálogo
+   (banco/nivel/estructura) simplemente se omite ESE dato puntual sin
+   tirar toda la fila -- el empleado se da de alta de todas formas.
+
+   nivel/estructura (gerencia) se buscan por NOMBRE exacto (sin
+   importar mayúsculas/espacios) contra los catálogos reales
+   (niveles.desc_nivel / gerencias.gerencia) -- si el xlsx trae un
+   nombre que no existe en el catálogo, se reporta como advertencia
+   de esa fila en vez de adivinar o crear uno nuevo.
+════════════════════════════════════════════════════════════ */
+if ($action === 'importarEmpleadosMasivo') {
+
+    if (!esSuperUsuarioSesion($conecta) && !tienePestanaPermitidaSesion($conecta, 'usuario')) {
+        echo json_encode(['ok' => false, 'msg' => 'No tienes permiso para dar de alta empleados.']);
+        exit;
+    }
+
+    set_time_limit(600); // manda un correo por fila -- con muchas filas puede tardar
+
+    $filas = $input['filas'] ?? [];
+    if (!is_array($filas) || empty($filas)) {
+        echo json_encode(['ok' => false, 'msg' => 'No se recibieron filas para procesar.']);
+        exit;
+    }
+
+    /* ── Precargar catálogos una sola vez (nombre normalizado -> id),
+       en vez de una consulta por fila -- con archivos grandes esto
+       importa. ── */
+    function normalizarNombreCatalogoRRHH($texto) {
+        $texto = mb_strtoupper(trim((string) $texto), 'UTF-8');
+        $texto = preg_replace('/\s+/', ' ', $texto);
+        return $texto;
+    }
+
+    $catalogoNiveles = [];
+    $rsN = $conecta->consulta("SELECT id_nivel, desc_nivel FROM carobra_2014.niveles");
+    if ($rsN) while ($r = mysqli_fetch_assoc($rsN)) {
+        $catalogoNiveles[normalizarNombreCatalogoRRHH(utf8_encode($r['desc_nivel']))] = intval($r['id_nivel']);
+    }
+
+    $catalogoGerencias = [];
+    $rsG = $conecta->consulta("SELECT DISTINCT id_gerencia, gerencia FROM carobra_2014.gerencias");
+    if ($rsG) while ($r = mysqli_fetch_assoc($rsG)) {
+        $catalogoGerencias[normalizarNombreCatalogoRRHH(utf8_encode($r['gerencia']))] = intval($r['id_gerencia']);
+    }
+
+    $catalogoBancos = [];
+    $rsB = $conecta->consulta("SELECT id_banco, banco FROM carobra.bancos");
+    if ($rsB) while ($r = mysqli_fetch_assoc($rsB)) {
+        $catalogoBancos[normalizarNombreCatalogoRRHH(utf8_encode($r['banco']))] = intval($r['id_banco']);
+    }
+
+    /* Parentesco: el xlsx no trae parentesco (solo nombre + teléfono
+       del contacto), así que se usa un default razonable -- "OTRO" si
+       existe en el catálogo, si no el primero que haya. Si el
+       catálogo está vacío de plano, el contacto simplemente no se
+       guarda (se reporta como advertencia). */
+    $idParentescoDefault = 0;
+    $rsP = $conecta->consulta("SELECT id_parentesco, parentesco FROM carobra_2014.parentescos ORDER BY id_parentesco");
+    if ($rsP) {
+        while ($r = mysqli_fetch_assoc($rsP)) {
+            if ($idParentescoDefault === 0) $idParentescoDefault = intval($r['id_parentesco']);
+            if (stripos((string) $r['parentesco'], 'OTRO') !== false) {
+                $idParentescoDefault = intval($r['id_parentesco']);
+                break;
+            }
+        }
+    }
+
+    /* Convierte lo que venga en la celda de fecha -- ya sea texto
+       'dd/mm/yyyy', 'yyyy-mm-dd' o un serial de Excel que el parseo
+       del navegador no haya normalizado -- a 'dd/mm/yyyy' (formato de
+       carobra.empleados.fec_ingreso). Si no se puede leer, regresa
+       hoy: un empleado siempre necesita alguna fec_ingreso, igual que
+       en el alta individual (que la pone en automático). */
+    function normalizarFechaIngresoRRHH($valor) {
+        $valor = trim((string) $valor);
+        if ($valor === '') return date('d/m/Y');
+
+        if (preg_match('#^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$#', $valor, $m)) {
+            return sprintf('%02d/%02d/%04d', (int) $m[1], (int) $m[2], (int) $m[3]);
+        }
+        if (preg_match('#^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})$#', $valor, $m)) {
+            return sprintf('%02d/%02d/%04d', (int) $m[3], (int) $m[2], (int) $m[1]);
+        }
+        // Serial de Excel (días desde 1899-12-30), por si el navegador lo mandó crudo
+        if (is_numeric($valor)) {
+            $ts = ((int) $valor - 25569) * 86400;
+            $fecha = gmdate('d/m/Y', $ts);
+            if ($fecha !== false) return $fecha;
+        }
+        return date('d/m/Y');
+    }
+
+    /* "SI"/"SÍ"/"1"/"X"/"TRUE" (sin importar mayúsculas/espacios) -> 1, cualquier otra cosa -> 0 */
+    function esSiRRHH($valor) {
+        $v = mb_strtoupper(trim((string) $valor), 'UTF-8');
+        return in_array($v, ['SI', 'SÍ', '1', 'X', 'TRUE', 'VERDADERO'], true) ? 1 : 0;
+    }
+
+    function htmlCorreoBienvenidaMasivaRRHH($clave, $password, $primerNombre) {
+        return '
+        <div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;background:#f4f6f8;padding:30px 0;">
+          <div style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.08);">
+            <div style="background:linear-gradient(135deg,#0f2942,#1a6785);padding:32px 28px;text-align:center;">
+              <div style="font-size:13px;letter-spacing:2px;color:#9fd4e8;font-weight:600;text-transform:uppercase;">CAROBRA</div>
+              <div style="font-size:11px;color:#cfe8f2;letter-spacing:1px;margin-top:2px;">Consultores Especializados</div>
+            </div>
+            <div style="padding:32px 28px;">
+              <h2 style="margin:0 0 6px;font-size:19px;color:#0f2942;">¡Bienvenido, ' . htmlspecialchars($primerNombre) . '! 🎉</h2>
+              <p style="margin:0 0 22px;font-size:13.5px;color:#555;line-height:1.6;">
+                Ya eres parte del equipo. Tu usuario en <strong>SISCA</strong> ha sido activado, aquí están tus accesos:
+              </p>
+              <div style="background:#f0f6f9;border:1px solid #d8e8ee;border-radius:10px;padding:18px 20px;margin-bottom:22px;">
+                <table style="width:100%;font-size:13.5px;color:#1a1a2e;">
+                  <tr>
+                    <td style="padding:6px 0;color:#888;width:90px;">Usuario</td>
+                    <td style="padding:6px 0;font-weight:700;letter-spacing:.5px;">' . htmlspecialchars($clave) . '</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;color:#888;">Contraseña</td>
+                    <td style="padding:6px 0;font-weight:700;font-family:monospace;letter-spacing:1px;background:#fff;border-radius:5px;display:inline-block;padding-left:8px;padding-right:8px;">' . htmlspecialchars($password) . '</td>
+                  </tr>
+                </table>
+              </div>
+              <p style="margin:0 0 22px;font-size:12.5px;color:#888;line-height:1.6;">
+                Por seguridad, puedes cambiar tu contraseña en cualquier momento dentro del sistema una vez que inicies sesión.
+              </p>
+              <div style="text-align:center;margin-bottom:6px;">
+                <a href="https://www.sis-ca.com.mx:7863/" style="display:inline-block;background:#1a6785;color:#fff;text-decoration:none;padding:11px 26px;border-radius:7px;font-size:13px;font-weight:600;">
+                  Entrar al sistema
+                </a>
+              </div>
+            </div>
+            <div style="background:#f4f6f8;padding:18px 28px;text-align:center;border-top:1px solid #e8e8e8;">
+              <p style="margin:0;font-size:11px;color:#999;">Atte. Administrador de Sistema</p>
+              <p style="margin:2px 0 0;font-size:11px;color:#999;">Carobra Consultores Especializados</p>
+            </div>
+          </div>
+        </div>';
+    }
+
+    $usuarioSesion = claveSesionActual($conecta);
+
+    $procesados      = 0;
+    $insertados      = 0;
+    $omitidos        = 0;
+    $omitidosDetalle = [];
+    $resultados      = []; // uno por empleado insertado, con sus advertencias puntuales
+
+    foreach ($filas as $i => $fila) {
+        $procesados++;
+        $numFila = $i + 2; // fila 1 = encabezados del xlsx
+
+        $nombres  = strtoupper(trim($fila['nombres'] ?? ''));
+        $apPat    = strtoupper(trim($fila['apellido_paterno'] ?? ''));
+        $apMat    = strtoupper(trim($fila['apellido_materno'] ?? ''));
+        $correo   = trim($fila['correo'] ?? '');
+
+        if ($nombres === '' || $apPat === '' || $apMat === '' || $correo === '') {
+            $omitidos++;
+            $omitidosDetalle[] = ['fila' => $numFila, 'motivo' => 'Faltan datos mínimos (Nombre(s), Apellido Paterno, Apellido Materno o Correo).'];
+            continue;
+        }
+        if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+            $omitidos++;
+            $omitidosDetalle[] = ['fila' => $numFila, 'motivo' => "Correo inválido: {$correo}"];
+            continue;
+        }
+
+        $nombreCompleto = trim("{$nombres} {$apPat} {$apMat}");
+        $correoEsc      = mysqli_real_escape_string($conecta->conexion, $correo);
+
+        $rsDup = $conecta->consulta("SELECT clave FROM carobra.usuarios WHERE email='{$correoEsc}' LIMIT 1");
+        if ($rsDup && mysqli_fetch_assoc($rsDup)) {
+            $omitidos++;
+            $omitidosDetalle[] = ['fila' => $numFila, 'motivo' => "El correo {$correo} ya está registrado."];
+            continue;
+        }
+
+        $advertencias = [];
+
+        $clave     = claveUnica($nombreCompleto, $conecta);
+        $claveEsc  = mysqli_real_escape_string($conecta->conexion, $clave);
+        $password  = generarPwd();
+        $contEsc   = mysqli_real_escape_string($conecta->conexion, substr($password, 0, 10));
+
+        $emailInst    = trim($fila['email_institucional'] ?? '');
+        $emailInstEsc = mysqli_real_escape_string($conecta->conexion, $emailInst);
+        $nombreEsc    = mysqli_real_escape_string($conecta->conexion, utf8_decode($nombreCompleto));
+
+        $okUsr = $conecta->consulta(
+            "INSERT INTO carobra.usuarios (clave, nombre, contrasena, activo, email, email_inst, pwd, afore, seg_inver, seg_educa)
+             VALUES ('{$claveEsc}', '{$nombreEsc}', '{$contEsc}', 1, '{$correoEsc}', '{$emailInstEsc}', '{$contEsc}', 0, 0, 0)"
+        );
+        if (!$okUsr) {
+            $omitidos++;
+            $omitidosDetalle[] = ['fila' => $numFila, 'motivo' => 'Error al crear el usuario: ' . $conecta->conexion->error];
+            continue;
+        }
+
+        $rsMax   = $conecta->consulta("SELECT IFNULL(MAX(no_empleado), 0) + 1 AS nuevo FROM carobra.empleados");
+        $rowMax  = $rsMax ? mysqli_fetch_assoc($rsMax) : null;
+        $nuevoNo = $rowMax ? intval($rowMax['nuevo']) : 1;
+
+        $fecIngreso = normalizarFechaIngresoRRHH($fila['fecha_ingreso'] ?? '');
+        $telefono   = trim($fila['telefono'] ?? '');
+        $rfc        = strtoupper(trim($fila['rfc'] ?? ''));
+        $curp       = strtoupper(trim($fila['curp'] ?? ''));
+        $nss        = trim($fila['nss'] ?? '');
+        $regimen    = strtoupper(trim($fila['regimen_fiscal'] ?? ''));
+        $factura     = esSiRRHH($fila['factura'] ?? '');
+        $napFactura  = esSiRRHH($fila['nap_factura'] ?? '');
+        $napGerencia = esSiRRHH($fila['nap_gerencia'] ?? '');
+        $aseBernal   = esSiRRHH($fila['ase_bernal'] ?? '');
+
+        $telEsc      = mysqli_real_escape_string($conecta->conexion, $telefono);
+        $rfcEsc      = mysqli_real_escape_string($conecta->conexion, $rfc);
+        $curpEsc     = mysqli_real_escape_string($conecta->conexion, $curp);
+        $nssEsc      = mysqli_real_escape_string($conecta->conexion, $nss);
+        $regimenEsc  = mysqli_real_escape_string($conecta->conexion, $regimen);
+        $fecIngresoEsc = mysqli_real_escape_string($conecta->conexion, $fecIngreso);
+
+        $okEmp = $conecta->consulta(
+            "INSERT INTO carobra.empleados
+                (no_empleado, clave, fec_ingreso, fec_reingreso, fec_baja,
+                 domicilio, telefono, celular, factura, fec_factura,
+                 regimen_fiscal, recluta, deportenis, no_prom_dep, rfc,
+                 curp, nss, nap_factura, nap_gerencia, ase_bernal,
+                 nae, categoria, fec_nap, cen_cost, no_contpaq,
+                 costo_a, staff, lista_negra, jefe_inmediato)
+             VALUES
+                ({$nuevoNo}, '{$claveEsc}', '{$fecIngresoEsc}', '', '',
+                 '', '{$telEsc}', '', {$factura}, '',
+                 '{$regimenEsc}', '', 0, '', '{$rfcEsc}',
+                 '{$curpEsc}', '{$nssEsc}', {$napFactura}, {$napGerencia}, {$aseBernal},
+                 '', 0, '', '', '',
+                 0, 0, 0, '')"
+        );
+        if (!$okEmp) {
+            $advertencias[] = 'No se pudo completar carobra.empleados: ' . $conecta->conexion->error;
+        }
+
+        /* ── Banco (opcional) ── */
+        $clabe = preg_replace('/\s+/', '', (string) ($fila['clabe'] ?? ''));
+        $bancoTxt = trim($fila['banco'] ?? '');
+        if ($clabe !== '' || $bancoTxt !== '') {
+            if (strlen($clabe) !== 18 || !ctype_digit($clabe)) {
+                $advertencias[] = 'CLABE inválida (debe tener 18 dígitos) -- no se guardó la cuenta bancaria.';
+            } else {
+                $idBanco = $catalogoBancos[normalizarNombreCatalogoRRHH($bancoTxt)] ?? 0;
+                if ($idBanco <= 0) {
+                    $advertencias[] = "Banco \"{$bancoTxt}\" no encontrado en el catálogo -- no se guardó la cuenta bancaria.";
+                } else {
+                    $nombreCta = sugerirNombreSeparado(trim($fila['nombre_cuentahabiente'] ?? $nombreCompleto));
+                    $ctaEsc = mysqli_real_escape_string($conecta->conexion, $nombreCta['nombres']);
+                    $apEsc  = mysqli_real_escape_string($conecta->conexion, $nombreCta['apellido_paterno']);
+                    $amEsc  = mysqli_real_escape_string($conecta->conexion, $nombreCta['apellido_materno']);
+                    $clabeEsc = mysqli_real_escape_string($conecta->conexion, $clabe);
+
+                    $okBco = $conecta->consulta(
+                        "INSERT INTO carobra.usuarios_banco (no_empleado, nombre_cta, ap_cta, am_cta, id_banco, clabe, activo)
+                         VALUES ({$nuevoNo}, '{$ctaEsc}', '{$apEsc}', '{$amEsc}', {$idBanco}, '{$clabeEsc}', 1)"
+                    );
+                    if (!$okBco) $advertencias[] = 'No se pudo guardar la cuenta bancaria: ' . $conecta->conexion->error;
+                }
+            }
+        }
+
+        /* ── Nivel (opcional) ── */
+        $nivelTxt = trim($fila['nivel'] ?? '');
+        if ($nivelTxt !== '') {
+            $idNivel = $catalogoNiveles[normalizarNombreCatalogoRRHH($nivelTxt)] ?? 0;
+            if ($idNivel > 0) {
+                $conecta->consulta("INSERT INTO carobra_2014.usuarios_nivel (clave, id_nivel) VALUES ('{$claveEsc}', {$idNivel})");
+            } else {
+                $advertencias[] = "Nivel \"{$nivelTxt}\" no encontrado en el catálogo -- no se asignó.";
+            }
+        }
+
+        /* ── Estructura / gerencia (opcional) ── */
+        $estructuraTxt = trim($fila['estructura'] ?? '');
+        if ($estructuraTxt !== '') {
+            $idGerencia = $catalogoGerencias[normalizarNombreCatalogoRRHH($estructuraTxt)] ?? 0;
+            if ($idGerencia > 0) {
+                $conecta->consulta("INSERT INTO carobra_2014.usuarios_gerencia (clave, id_gerencia, pertenece) VALUES ('{$claveEsc}', {$idGerencia}, 1)");
+            } else {
+                $advertencias[] = "Estructura/gerencia \"{$estructuraTxt}\" no encontrada en el catálogo -- no se asignó.";
+            }
+        }
+
+        /* ── Contacto de emergencia (opcional) ── */
+        $contactoNombre   = strtoupper(trim($fila['contacto_emergencia_nombre'] ?? ''));
+        $contactoTelefono = trim($fila['contacto_emergencia_telefono'] ?? '');
+        if ($contactoNombre !== '' && $contactoTelefono !== '') {
+            if ($idParentescoDefault <= 0) {
+                $advertencias[] = 'No hay catálogo de parentescos configurado -- no se guardó el contacto de emergencia.';
+            } else {
+                $contNombreEsc = mysqli_real_escape_string($conecta->conexion, utf8_decode($contactoNombre));
+                $contNumEsc    = mysqli_real_escape_string($conecta->conexion, $contactoTelefono);
+                $conecta->consulta(
+                    "INSERT INTO carobra_2014.contactos_emergencia (clave, nombre, numero, id_parentesco)
+                     VALUES ('{$claveEsc}', '{$contNombreEsc}', '{$contNumEsc}', {$idParentescoDefault})"
+                );
+            }
+        } elseif ($contactoNombre !== '' xor $contactoTelefono !== '') {
+            $advertencias[] = 'Contacto de emergencia incompleto (falta nombre o teléfono) -- no se guardó.';
+        }
+
+        /* ── Correo de bienvenida (uno por empleado, igual que el alta individual) ── */
+        $primerNombre = ucfirst(strtolower(explode(' ', $nombres)[0]));
+        envia_correo(
+            htmlCorreoBienvenidaMasivaRRHH($clave, $password, $primerNombre),
+            'administrador.sisca@carobra.com',
+            $correo,
+            null,
+            'Tu usuario en el Sistema Carobra fue activado',
+            ''
+        );
+
+        $insertados++;
+        $resultados[] = [
+            'fila'          => $numFila,
+            'clave'         => $clave,
+            'nombre'        => $nombreCompleto,
+            'email'         => $correo,
+            'advertencias'  => $advertencias,
+        ];
+    }
+
+    $mensaje = "Se procesaron {$procesados} fila(s): {$insertados} empleado(s) dado(s) de alta.";
+    if ($omitidos > 0) $mensaje .= " {$omitidos} fila(s) omitida(s).";
+
+    echo json_encode([
+        'ok'               => true,
+        'msg'              => $mensaje,
+        'procesados'       => $procesados,
+        'insertados'       => $insertados,
+        'omitidos'         => $omitidos,
+        'omitidosDetalle'  => $omitidosDetalle,
+        'resultados'       => $resultados,
+    ]);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
    BOLETINADOS PRINCIPAL
 
    Lista de personas boletinadas (no deseables para contratación)
@@ -522,7 +881,7 @@ if ($action === 'listarBoletinados') {
     }
 
     $rs = $conecta->consulta(
-        "SELECT id, nombres, apellido_paterno, apellido_materno, capturado_por, fec_captura
+        "SELECT id, nombres, apellido_paterno, apellido_materno, observaciones, capturado_por, fec_captura
            FROM carobra_2014.boletinados_principal
            {$where}
            ORDER BY fec_captura DESC"
@@ -549,6 +908,10 @@ if ($action === 'guardarBoletinado') {
     $nombres = strtoupper(trim($input['nombres'] ?? ''));
     $apPat   = strtoupper(trim($input['apellido_paterno'] ?? ''));
     $apMat   = strtoupper(trim($input['apellido_materno'] ?? ''));
+    $observ  = trim($input['observaciones'] ?? '');
+    if (mb_strlen($observ) > 500) {
+        $observ = mb_substr($observ, 0, 500);
+    }
 
     if ($nombres === '' || $apPat === '') {
         echo json_encode(['ok' => false, 'msg' => 'Captura al menos Nombre(s) y Apellido paterno.']);
@@ -558,11 +921,12 @@ if ($action === 'guardarBoletinado') {
     $nombresEsc     = mysqli_real_escape_string($conecta->conexion, $nombres);
     $apPatEsc       = mysqli_real_escape_string($conecta->conexion, $apPat);
     $apMatEsc       = mysqli_real_escape_string($conecta->conexion, $apMat);
+    $observEsc      = mysqli_real_escape_string($conecta->conexion, $observ);
     $claveSesionEsc = mysqli_real_escape_string($conecta->conexion, claveSesionActual($conecta));
 
     $ok = $conecta->consulta(
-        "INSERT INTO carobra_2014.boletinados_principal (nombres, apellido_paterno, apellido_materno, capturado_por)
-         VALUES ('{$nombresEsc}', '{$apPatEsc}', '{$apMatEsc}', '{$claveSesionEsc}')"
+        "INSERT INTO carobra_2014.boletinados_principal (nombres, apellido_paterno, apellido_materno, observaciones, capturado_por)
+         VALUES ('{$nombresEsc}', '{$apPatEsc}', '{$apMatEsc}', '{$observEsc}', '{$claveSesionEsc}')"
     );
 
     if (!$ok) {
@@ -575,6 +939,43 @@ if ($action === 'guardarBoletinado') {
         'msg' => 'Agregado a la lista de boletinados.',
         'id'  => mysqli_insert_id($conecta->conexion),
     ]);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTION: actualizarObservacionBoletinado
+   Edita SOLO la observación de un registro ya existente en
+   boletinados_principal (nombre/apellidos no se tocan aquí).
+════════════════════════════════════════════════════════════ */
+if ($action === 'actualizarObservacionBoletinado') {
+
+    if (!esSuperUsuarioSesion($conecta) && !tienePestanaPermitidaSesion($conecta, 'boletinados')) {
+        echo json_encode(['ok' => false, 'msg' => 'No tienes permiso para esta acción.']);
+        exit;
+    }
+
+    $id = intval($input['id'] ?? 0);
+    if ($id <= 0) {
+        echo json_encode(['ok' => false, 'msg' => 'Registro inválido.']);
+        exit;
+    }
+
+    $observ = trim($input['observaciones'] ?? '');
+    if (mb_strlen($observ) > 500) {
+        $observ = mb_substr($observ, 0, 500);
+    }
+    $observEsc = mysqli_real_escape_string($conecta->conexion, $observ);
+
+    $ok = $conecta->consulta(
+        "UPDATE carobra_2014.boletinados_principal SET observaciones = '{$observEsc}' WHERE id = {$id}"
+    );
+
+    if (!$ok) {
+        echo json_encode(['ok' => false, 'msg' => 'No se pudo actualizar: ' . $conecta->conexion->error]);
+        exit;
+    }
+
+    echo json_encode(['ok' => true, 'msg' => 'Observación actualizada.']);
     exit;
 }
 
@@ -709,6 +1110,98 @@ function guardarNombreSeparadoBD($conecta, $clave, $nombres, $apellidoPaterno, $
             apellido_paterno = VALUES(apellido_paterno),
             apellido_materno = VALUES(apellido_materno)
     ");
+}
+
+/* ════════════════════════════════════════════════════════════
+   PESTAÑA TARJETAS -- carobra_2014.empleados_tarjetas (1 fila por clave)
+   El nivel NO se guarda: se calcula en vivo como
+   max(id_nivel) de usuarios_nivel_gerencia por clave.
+════════════════════════════════════════════════════════════ */
+function productosBaseTarjeta() {
+    return ['Bradescard', 'Sears', 'Falabella', 'Registros'];
+}
+
+function nivelDeClaveTarjeta($conecta, $claveEsc) {
+    $rs  = $conecta->consulta("SELECT MAX(id_nivel) AS id_nivel
+                               FROM carobra_2014.usuarios_nivel_gerencia
+                               WHERE clave = '{$claveEsc}'");
+    $row = $rs ? mysqli_fetch_assoc($rs) : null;
+    if (!$row || $row['id_nivel'] === null) return ['id_nivel' => null, 'nivel' => ''];
+    $id  = intval($row['id_nivel']);
+    $nom = '';
+    $rn  = $conecta->consulta("SELECT desc_nivel FROM carobra_2014.niveles WHERE id_nivel = {$id} LIMIT 1");
+    if ($rn && ($fn = mysqli_fetch_assoc($rn)) && isset($fn['desc_nivel'])) $nom = utf8_encode($fn['desc_nivel']);
+    return ['id_nivel' => $id, 'nivel' => $nom];
+}
+
+if ($action === 'getTarjeta') {
+    $clave = trim($input['clave'] ?? '');
+    if ($clave === '') { echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']); exit; }
+    $claveEsc = mysqli_real_escape_string($conecta->conexion, utf8_decode($clave));
+
+    $rs  = $conecta->consulta("SELECT producto_base, banco, tiene_sueldo, usuario_soc, usuario_bid, fecha_mod, usuario_mod
+                               FROM carobra_2014.empleados_tarjetas WHERE clave = '{$claveEsc}' LIMIT 1");
+    $row = $rs ? mysqli_fetch_assoc($rs) : null;
+
+    echo json_encode([
+        'ok'        => true,
+        'existe'    => (bool)$row,
+        'productos' => productosBaseTarjeta(),
+        'data'      => $row ? [
+            'producto_base' => $row['producto_base'],
+            'banco'         => $row['banco'] ?? '',
+            'tiene_sueldo'  => intval($row['tiene_sueldo']) === 1,
+            'usuario_soc'   => $row['usuario_soc'] ?? '',
+            'usuario_bid'   => $row['usuario_bid'] ?? '',
+            'fecha_mod'     => $row['fecha_mod'],
+            'usuario_mod'   => $row['usuario_mod'],
+        ] : null,
+        'nivel'     => nivelDeClaveTarjeta($conecta, $claveEsc),
+    ]);
+    exit;
+}
+
+if ($action === 'guardarTarjeta') {
+    $clave = trim($input['clave'] ?? '');
+    if ($clave === '') { echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']); exit; }
+
+    $producto = trim($input['producto_base'] ?? '');
+    if (!in_array($producto, productosBaseTarjeta(), true)) {
+        echo json_encode(['ok' => false, 'msg' => 'Selecciona un producto base válido.']); exit;
+    }
+    $banco = trim($input['banco'] ?? '');
+    if (mb_strlen($banco) > 100) { echo json_encode(['ok' => false, 'msg' => 'El banco admite máximo 100 caracteres.']); exit; }
+
+    $soc = trim($input['usuario_soc'] ?? '');
+    $bid = trim($input['usuario_bid'] ?? '');
+    if ($soc !== '' && !preg_match('/^\d{1,9}$/', $soc)) { echo json_encode(['ok' => false, 'msg' => 'Usuario Soc: solo números, máximo 9 dígitos.']); exit; }
+    if ($bid !== '' && !preg_match('/^\d{1,9}$/', $bid)) { echo json_encode(['ok' => false, 'msg' => 'Usuario Bid: solo números, máximo 9 dígitos.']); exit; }
+
+    $sueldo = !empty($input['tiene_sueldo']) ? 1 : 0;
+
+    $claveEsc = mysqli_real_escape_string($conecta->conexion, utf8_decode($clave));
+    $prodEsc  = mysqli_real_escape_string($conecta->conexion, $producto);
+    $bancoSql = $banco === '' ? 'NULL' : "'" . mysqli_real_escape_string($conecta->conexion, $banco) . "'";
+    $socSql   = $soc   === '' ? 'NULL' : "'{$soc}'";
+    $bidSql   = $bid   === '' ? 'NULL' : "'{$bid}'";
+    $usrEsc   = mysqli_real_escape_string($conecta->conexion, $_SESSION['nombre'] ?? '');
+
+    $ok = $conecta->consulta("
+        INSERT INTO carobra_2014.empleados_tarjetas
+            (clave, producto_base, banco, tiene_sueldo, usuario_soc, usuario_bid, usuario_mod)
+        VALUES ('{$claveEsc}', '{$prodEsc}', {$bancoSql}, {$sueldo}, {$socSql}, {$bidSql}, '{$usrEsc}')
+        ON DUPLICATE KEY UPDATE
+            producto_base = VALUES(producto_base),
+            banco         = VALUES(banco),
+            tiene_sueldo  = VALUES(tiene_sueldo),
+            usuario_soc   = VALUES(usuario_soc),
+            usuario_bid   = VALUES(usuario_bid),
+            usuario_mod   = VALUES(usuario_mod)
+    ");
+
+    if (!$ok) { echo json_encode(['ok' => false, 'msg' => 'Error al guardar: ' . mysqli_error($conecta->conexion)]); exit; }
+    echo json_encode(['ok' => true, 'msg' => 'Tarjeta guardada.']);
+    exit;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -856,9 +1349,24 @@ if ($action === 'getDatosGenerales') {
         if ($rowNap) $nap = utf8_encode($rowNap['nap']);
     }
 
+    /* Lista negra: estado vigente en carobra.empleados.lista_negra (1 = activa).
+       El comentario ES la observación vigente (carobra_2014.empl_observaciones),
+       la misma que se ve/edita en la sección Observaciones de Datos generales. */
+    $listaNegra = $row ? intval($row['lista_negra'] ?? 0) : 0;
+    $listaNegraComentario = '';
+    if ($listaNegra === 1 && $row && !empty($row['clave'])) {
+        $claveLn = mysqli_real_escape_string($conecta->conexion, $row['clave']);
+        $rsLn    = $conecta->consulta("SELECT observaciones FROM carobra_2014.empl_observaciones
+                                       WHERE clave='{$claveLn}' LIMIT 1");
+        $rowLn   = $rsLn ? mysqli_fetch_assoc($rsLn) : null;
+        if ($rowLn) $listaNegraComentario = $rowLn['observaciones'] ?? '';
+    }
+
     echo json_encode([
         'ok'    => true,
         'datos' => [
+            'lista_negra'            => $listaNegra,
+            'lista_negra_comentario' => $listaNegraComentario,
             'fec_ingreso'      => $row ? formatoFechaInput($row['fec_ingreso'] ?? '')   : '',
             'fec_reingreso'    => $row ? formatoFechaInput($row['fec_reingreso'] ?? '') : '',
             'fec_baja'         => $row ? formatoFechaInput($row['fec_baja'] ?? '')      : '',
@@ -893,6 +1401,7 @@ if ($action === 'guardarDatosGenerales') {
 
     /* Esta tabla (carobra.empleados) trabaja en latin1; se fuerza el
        charset de la sesión por si la conexión quedó en otro estado. */
+    $charsetOriginal = $conecta->conexion->character_set_name();
     $conecta->conexion->set_charset('latin1');
 
     $clave = trim($input['clave'] ?? '');
@@ -906,9 +1415,21 @@ if ($action === 'guardarDatosGenerales') {
     /* Leer las fechas ANTES del UPDATE para detectar cuál cambió
        y poder registrar el evento en historial_movimientos */
     $rsFechasViejas  = $conecta->consulta(
-        "SELECT fec_ingreso, fec_reingreso, fec_baja FROM carobra.empleados WHERE clave='{$claveEsc}' LIMIT 1"
+        "SELECT fec_ingreso, fec_reingreso, fec_baja, lista_negra FROM carobra.empleados WHERE clave='{$claveEsc}' LIMIT 1"
     );
     $rowFechasViejas = $rsFechasViejas ? mysqli_fetch_assoc($rsFechasViejas) : null;
+
+    /* Lista negra: si pasa de 0 a 1 el comentario es OBLIGATORIO (se valida
+       antes de tocar nada) y se guarda como la observación vigente del
+       empleado (empl_observaciones), no en una tabla aparte. */
+    $listaNegraNueva = !empty($input['lista_negra']) ? 1 : 0;
+    $listaNegraVieja = $rowFechasViejas ? intval($rowFechasViejas['lista_negra'] ?? 0) : 0;
+    $comentarioLn    = trim($input['lista_negra_comentario'] ?? '');
+    if (mb_strlen($comentarioLn) > 500) $comentarioLn = mb_substr($comentarioLn, 0, 500);
+    if ($listaNegraNueva === 1 && $listaNegraVieja === 0 && $comentarioLn === '') {
+        echo json_encode(['ok' => false, 'msg' => 'Para agregar a lista negra es obligatorio capturar un comentario.']);
+        exit;
+    }
 
     $fecIngreso   = formatoFechaBD($input['fec_ingreso']   ?? '');
     $fecReingreso = formatoFechaBD($input['fec_reingreso'] ?? '');
@@ -955,6 +1476,7 @@ if ($action === 'guardarDatosGenerales') {
             fec_reingreso   = '{$fecReingreso}',
             fec_baja        = '{$fecBaja}',
             staff           = {$staff},
+            lista_negra     = {$listaNegraNueva},
             deportenis      = {$espartano},
             no_prom_dep     = '{$noPromDepEsc}',
             jefe_inmediato  = '{$jefeEsc}',
@@ -972,6 +1494,24 @@ if ($action === 'guardarDatosGenerales') {
     if (!$okEmp) {
         echo json_encode(['ok' => false, 'msg' => 'Error al guardar en empleados: ' . $conecta->conexion->error]);
         exit;
+    }
+
+    /* Lista negra: el comentario capturado pasa a ser la observación vigente.
+       Se escribe con el charset original de la conexión (el mismo que usa
+       guardarObservacion) para que se lea igual en la sección Observaciones. */
+    if ($listaNegraNueva === 1 && $listaNegraVieja === 0 && $comentarioLn !== '') {
+        $conecta->conexion->set_charset($charsetOriginal);
+        $obsEsc = mysqli_real_escape_string($conecta->conexion, $comentarioLn);
+        $usrEsc = mysqli_real_escape_string($conecta->conexion, claveSesionActual($conecta));
+        $conecta->consulta(
+            "INSERT INTO carobra_2014.empl_observaciones (clave, observaciones, usuario_captura)
+             VALUES ('{$claveEsc}', '{$obsEsc}', '{$usrEsc}')
+             ON DUPLICATE KEY UPDATE
+                observaciones   = VALUES(observaciones),
+                usuario_captura = VALUES(usuario_captura),
+                fecha_captura   = CURRENT_TIMESTAMP"
+        );
+        $conecta->conexion->set_charset('latin1');
     }
 
     /* Al guardar como Espartano se le crea su fila en espartanos_pagos
@@ -1051,6 +1591,243 @@ if ($action === 'guardarDatosGenerales') {
     }
 
     echo json_encode(['ok' => true, 'msg' => 'Datos generales actualizados correctamente.']);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTION: getObservacion
+   Trae la observación vigente de empl_observaciones (a lo más 1 por
+   clave). Sin historial: la más reciente es la única que importa.
+
+   OJO: empl_observa (sin "ciones") es la tabla VIEJA -- ahora es solo
+   un respaldo de lo que había antes de este módulo, con no_empleado
+   como llave. Ya no se lee ni se escribe desde aquí; su contenido
+   vigente se trajo una sola vez a empl_observaciones (ver
+   empl_observa_migracion.sql).
+════════════════════════════════════════════════════════════ */
+if ($action === 'getObservacion') {
+
+    $clave = strtoupper(trim($input['clave'] ?? ''));
+    if (empty($clave)) {
+        echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']);
+        exit;
+    }
+
+    $claveEsc = mysqli_real_escape_string($conecta->conexion, $clave);
+
+    $rsActual  = $conecta->consulta(
+        "SELECT id, observaciones, fecha_captura, usuario_captura
+         FROM carobra_2014.empl_observaciones
+         WHERE clave = '{$claveEsc}'
+         LIMIT 1"
+    );
+    $rowActual = $rsActual ? mysqli_fetch_assoc($rsActual) : null;
+
+    echo json_encode([
+        'ok'     => true,
+        'actual' => $rowActual ? [
+            'id'              => intval($rowActual['id']),
+            'observaciones'   => $rowActual['observaciones']   ?? '',
+            'fecha_captura'   => $rowActual['fecha_captura']    ?? '',
+            'usuario_captura' => $rowActual['usuario_captura']  ?? '',
+        ] : null,
+    ]);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTION: guardarObservacion
+   Sin historial: actualiza directo la fila de esta clave en
+   empl_observaciones (INSERT ... ON DUPLICATE KEY UPDATE). Lo
+   anterior no se guarda en ningún lado -- solo importa lo vigente.
+════════════════════════════════════════════════════════════ */
+if ($action === 'guardarObservacion') {
+
+    $clave = strtoupper(trim($input['clave'] ?? ''));
+    if (empty($clave)) {
+        echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']);
+        exit;
+    }
+
+    $texto = trim($input['observaciones'] ?? '');
+    if ($texto === '') {
+        echo json_encode(['ok' => false, 'msg' => 'La observación no puede estar vacía.']);
+        exit;
+    }
+    if (mb_strlen($texto) > 500) {
+        $texto = mb_substr($texto, 0, 500);
+    }
+
+    $claveEsc      = mysqli_real_escape_string($conecta->conexion, $clave);
+    $textoEsc      = mysqli_real_escape_string($conecta->conexion, $texto);
+    $usuarioSesEsc = mysqli_real_escape_string($conecta->conexion, claveSesionActual($conecta));
+
+    $ok = $conecta->consulta(
+        "INSERT INTO carobra_2014.empl_observaciones (clave, observaciones, usuario_captura)
+         VALUES ('{$claveEsc}', '{$textoEsc}', '{$usuarioSesEsc}')
+         ON DUPLICATE KEY UPDATE
+            observaciones   = VALUES(observaciones),
+            usuario_captura = VALUES(usuario_captura),
+            fecha_captura   = CURRENT_TIMESTAMP"
+    );
+
+    if (!$ok) {
+        echo json_encode(['ok' => false, 'msg' => 'No se pudo guardar la observación: ' . $conecta->conexion->error]);
+        exit;
+    }
+
+    echo json_encode(['ok' => true, 'msg' => 'Observación guardada correctamente.']);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTION: getDatosBaja
+   Datos para el modal "Dar de baja" de la pestaña Información:
+   fec_baja y ase_bernal (carobra.empleados), activo (carobra.usuarios),
+   NAP vigente (carobra_2014.naps) y observación vigente
+   (carobra_2014.empl_observaciones). NAP y Asesoría Bernal son solo
+   informativos en el modal.
+════════════════════════════════════════════════════════════ */
+if ($action === 'getDatosBaja') {
+
+    $clave = trim($input['clave'] ?? '');
+    if (empty($clave)) {
+        echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']);
+        exit;
+    }
+
+    $esc = mysqli_real_escape_string($conecta->conexion, utf8_decode($clave));
+
+    $rsE  = $conecta->consulta(
+        "SELECT no_empleado, fec_baja, ase_bernal FROM carobra.empleados WHERE clave='{$esc}' LIMIT 1"
+    );
+    $rowE = $rsE ? mysqli_fetch_assoc($rsE) : null;
+
+    $rsU  = $conecta->consulta("SELECT activo FROM carobra.usuarios WHERE clave='{$esc}' LIMIT 1");
+    $rowU = $rsU ? mysqli_fetch_assoc($rsU) : null;
+
+    $nap = '';
+    if ($rowE && !empty($rowE['no_empleado'])) {
+        $noEmp = intval($rowE['no_empleado']);
+        $rsNap = $conecta->consulta(
+            "SELECT nap FROM carobra_2014.naps WHERE no_empleado={$noEmp} AND baja=0 LIMIT 1"
+        );
+        $rowNap = $rsNap ? mysqli_fetch_assoc($rsNap) : null;
+        if ($rowNap) $nap = utf8_encode($rowNap['nap']);
+    }
+
+    $obsClaveEsc = mysqli_real_escape_string($conecta->conexion, strtoupper($clave));
+    $rsO  = $conecta->consulta(
+        "SELECT observaciones FROM carobra_2014.empl_observaciones WHERE clave='{$obsClaveEsc}' LIMIT 1"
+    );
+    $rowO = $rsO ? mysqli_fetch_assoc($rsO) : null;
+
+    echo json_encode([
+        'ok'    => true,
+        'datos' => [
+            'fec_baja'      => $rowE ? formatoFechaInput($rowE['fec_baja'] ?? '') : '',
+            'activo'        => $rowU ? intval($rowU['activo']) : 0,
+            'ase_bernal'    => $rowE ? intval($rowE['ase_bernal'] ?? 0) : 0,
+            'nap'           => $nap,
+            'observaciones' => $rowO ? ($rowO['observaciones'] ?? '') : '',
+        ]
+    ]);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTION: guardarBaja
+   Un solo guardado desde el modal "Dar de baja":
+     1) empl_observaciones  -> upsert de la observación (1 por clave)
+     2) carobra.empleados   -> UPDATE fec_baja
+     3) carobra.usuarios    -> UPDATE activo (0 = baja, 1 = reactivar)
+     4) historial_movimientos -> evento 'baja' si la fecha cambió
+   Reglas: si activo=0 la fecha de baja es obligatoria; la observación
+   (motivo) siempre es obligatoria.
+════════════════════════════════════════════════════════════ */
+if ($action === 'guardarBaja') {
+
+    $clave = trim($input['clave'] ?? '');
+    if (empty($clave)) {
+        echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']);
+        exit;
+    }
+
+    $activo   = intval($input['activo'] ?? 0) === 1 ? 1 : 0;
+    $fecBaja  = formatoFechaBD($input['fec_baja'] ?? '');
+    $texto    = trim($input['observaciones'] ?? '');
+
+    if ($texto === '') {
+        echo json_encode(['ok' => false, 'msg' => 'La observación es obligatoria.']);
+        exit;
+    }
+    if (mb_strlen($texto) > 500) {
+        $texto = mb_substr($texto, 0, 500);
+    }
+    if ($activo === 0 && $fecBaja === '') {
+        echo json_encode(['ok' => false, 'msg' => 'Captura la fecha de baja.']);
+        exit;
+    }
+
+    $esc           = mysqli_real_escape_string($conecta->conexion, utf8_decode($clave));
+    $claveObsEsc   = mysqli_real_escape_string($conecta->conexion, strtoupper($clave));
+    $textoEsc      = mysqli_real_escape_string($conecta->conexion, $texto);
+    $fecBajaEsc    = mysqli_real_escape_string($conecta->conexion, $fecBaja);
+    $usuarioSesEsc = mysqli_real_escape_string($conecta->conexion, claveSesionActual($conecta));
+
+    /* Fecha anterior, para saber si hay que registrar el evento */
+    $rsV  = $conecta->consulta("SELECT fec_baja FROM carobra.empleados WHERE clave='{$esc}' LIMIT 1");
+    $rowV = $rsV ? mysqli_fetch_assoc($rsV) : null;
+    if (!$rowV) {
+        echo json_encode(['ok' => false, 'msg' => 'No se encontró al empleado en carobra.empleados.']);
+        exit;
+    }
+
+    /* 1) Observación */
+    $okObs = $conecta->consulta(
+        "INSERT INTO carobra_2014.empl_observaciones (clave, observaciones, usuario_captura)
+         VALUES ('{$claveObsEsc}', '{$textoEsc}', '{$usuarioSesEsc}')
+         ON DUPLICATE KEY UPDATE
+            observaciones   = VALUES(observaciones),
+            usuario_captura = VALUES(usuario_captura),
+            fecha_captura   = CURRENT_TIMESTAMP"
+    );
+    if (!$okObs) {
+        echo json_encode(['ok' => false, 'msg' => 'No se pudo guardar la observación: ' . $conecta->conexion->error]);
+        exit;
+    }
+
+    /* 2) Fecha de baja en empleados */
+    $okEmp = $conecta->consulta(
+        "UPDATE carobra.empleados SET fec_baja = '{$fecBajaEsc}' WHERE clave = '{$esc}'"
+    );
+    if (!$okEmp) {
+        echo json_encode(['ok' => false, 'msg' => 'No se pudo actualizar la fecha de baja: ' . $conecta->conexion->error]);
+        exit;
+    }
+
+    /* 3) Activo en usuarios */
+    $okUsr = $conecta->consulta(
+        "UPDATE carobra.usuarios SET activo = {$activo} WHERE clave = '{$esc}'"
+    );
+    if (!$okUsr) {
+        echo json_encode(['ok' => false, 'msg' => 'No se pudo actualizar el estatus del usuario: ' . $conecta->conexion->error]);
+        exit;
+    }
+
+    /* 4) Historial de movimientos (solo si la fecha cambió y no quedó vacía) */
+    $fechaVieja = $rowV['fec_baja'] ?? '';
+    if ($fecBaja !== '' && $fecBaja !== $fechaVieja) {
+        $conecta->consulta(
+            "INSERT INTO carobra_2014.historial_movimientos (clave, tipo, fecha_evento)
+             VALUES ('{$esc}', 'baja', '{$fecBajaEsc}')"
+        );
+    }
+
+    echo json_encode([
+        'ok'  => true,
+        'msg' => $activo === 0 ? 'Baja registrada correctamente.' : 'Datos actualizados; el usuario permanece activo.'
+    ]);
     exit;
 }
 
@@ -2407,6 +3184,7 @@ if ($action === 'getInfoEmpleado') {
     [$anticipo2Folios, ] = resolverAnticipo2($conecta, $claveEsc);
     $acompanamiento       = resolverAcompanamiento($conecta, $claveEsc);
     $foliosProduccion     = resolverFoliosProduccion($conecta, $claveEsc);
+    $aforeMovil           = resolverAforeMovilPendientes($conecta, $claveEsc);
 
     echo json_encode([
         'ok'                       => true,
@@ -2419,8 +3197,26 @@ if ($action === 'getInfoEmpleado') {
         'acompanamiento_pagar'     => count($acompanamiento['pagar']),
         'es_dueno_nap'             => $acompanamiento['es_dueno_nap'],
         'folios_por_cobrar'        => count($foliosProduccion['por_cobrar']),
+        'afore_movil_pendientes'   => count($aforeMovil['registros']),
 
     ]);
+    exit;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTION: getAforeMovilDetalle
+   Detalle de los registros de Afore Móvil pendientes por cobrar
+   (mismo filtro que el contador de getInfoEmpleado), para el modal
+   de la card.
+════════════════════════════════════════════════════════════ */
+if ($action === 'getAforeMovilDetalle') {
+    $clave = trim($input['clave'] ?? '');
+    if (empty($clave)) { echo json_encode(['ok' => false, 'msg' => 'Clave inválida.']); exit; }
+    $claveEsc = mysqli_real_escape_string($conecta->conexion, utf8_decode($clave));
+
+    $aforeMovil = resolverAforeMovilPendientes($conecta, $claveEsc);
+
+    echo json_encode(['ok' => true, 'registros' => $aforeMovil['registros']]);
     exit;
 }
 
@@ -2599,6 +3395,74 @@ function resolverFoliosProduccion($conecta, $claveEsc) {
     }
 
     return $folios;
+}
+
+/* ════════════════════════════════════════════════════════════
+   AFORE MÓVIL -- pendientes por cobrar
+
+   carobra_2014.registros_afore_movil trae registros capturados desde
+   la app Afore Móvil; asesor guarda el NAP del asesor que los
+   levantó (igual que produccion.nap identifica al asesor en el resto
+   del sistema -- NO es la clave del empleado). Se considera
+   "pendiente por cobrar" un registro que:
+     - tiene asesor capturado (no vacío) y es el NAP vigente de este
+       empleado,
+     - no tiene fec_pago todavía (fec_pago vacío = no se ha cobrado),
+     - el cliente tiene menos de 60 años (edad),
+     - está en estatus ACEPTADO,
+     - y pasaron menos de 8 días entre fec_captura_sf y fec_envio
+       (fórmula de DATEDIFF exacta que ya usa Principal para este
+       cálculo -- ambas son char(10) 'dd/mm/aaaa', se arma 'aaaa-mm-dd'
+       con SUBSTR para que DATEDIFF las entienda).
+════════════════════════════════════════════════════════════ */
+
+function resolverAforeMovilPendientes($conecta, $claveEsc) {
+    $resultado = ['registros' => []];
+
+    $noEmpleado = resolverNoEmpleado($conecta, $claveEsc);
+    if (!$noEmpleado) return $resultado;
+
+    $rsNap  = $conecta->consulta("SELECT nap FROM naps WHERE no_empleado = {$noEmpleado} AND baja = 0 LIMIT 1");
+    $rowNap = $rsNap ? mysqli_fetch_assoc($rsNap) : null;
+    if (!$rowNap || empty($rowNap['nap'])) return $resultado; // sin nap propio vigente, no puede tener registros a su nombre
+
+    $napEsc = mysqli_real_escape_string($conecta->conexion, $rowNap['nap']);
+
+    $rs = $conecta->consulta(
+        "SELECT folio, no_oportunidad, cliente, curp, edad, nap, estatus,
+                fec_captura, fec_captura_sf, fec_envio, fec_pago, monto
+         FROM carobra_2014.registros_afore_movil
+         WHERE asesor = '{$napEsc}'
+           AND asesor <> ''
+           AND (fec_pago IS NULL OR fec_pago = '')
+           AND edad < 60
+           AND UPPER(TRIM(estatus)) = 'ACEPTADO'
+           AND DATEDIFF(
+                 CONCAT(SUBSTR(fec_captura_sf,-4),'-',SUBSTR(fec_captura_sf,4,2),'-',SUBSTR(fec_captura_sf,1,2)),
+                 CONCAT(SUBSTR(fec_envio,-4),'-',SUBSTR(fec_envio,4,2),'-',SUBSTR(fec_envio,1,2))
+               ) < 8
+         ORDER BY fec_captura DESC"
+    );
+
+    if ($rs) {
+        while ($row = mysqli_fetch_assoc($rs)) {
+            $resultado['registros'][] = [
+                'folio'           => $row['folio'],
+                'no_oportunidad'  => $row['no_oportunidad'],
+                'cliente'         => $row['cliente'],
+                'curp'            => $row['curp'],
+                'edad'            => intval($row['edad']),
+                'nap'             => $row['nap'],
+                'estatus'         => $row['estatus'],
+                'fec_captura'     => $row['fec_captura'],
+                'fec_captura_sf'  => $row['fec_captura_sf'],
+                'fec_envio'       => $row['fec_envio'],
+                'monto'           => floatval($row['monto']),
+            ];
+        }
+    }
+
+    return $resultado;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2912,6 +3776,7 @@ $PESTANAS_VALIDAS = [
     'contactos_emergencia',
     'info',
     'expediente_digital',
+    'tarjetas',
     'boletinados',
     'permisos',
 ];

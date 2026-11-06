@@ -75,16 +75,23 @@ switch ($action) {
 		en estruc_empleados. Si es "espartan" (sc, brocker o gerencia trae
 		literalmente ese valor), se muestra solo "ESPARTAN" en vez de la
 		combinación SC/Brocker/Gerencia -- resuelto abajo en PHP. */
-		$sql = "SELECT c.folio, c.sol_traspaso, CONCAT(c.fec_traspaso, ' 00:00:00') AS fec_traspaso,
-		               c.saldo, c.semana, c.cancelacion, c.fec_tramite, c.pplus,
-		               sc.clave, sc.fecha_captura, sc.medio_cancelacion, eu.nombre,
-		               ee.sc AS estruc_sc, ee.brocker AS estruc_brocker, g.gerencia AS estruc_gerencia
-		        FROM clawback c
-		        INNER JOIN retenciones_captura sc ON c.folio = sc.folio
-		        INNER JOIN empl_usuarios eu ON sc.clave = eu.clave
-		        LEFT JOIN estruc_empleados ee ON ee.clave = sc.clave
-		        LEFT JOIN gerencias g ON g.id_gerencia = ee.id_gerencia
-		        WHERE c.semana = '$semanaEsc'";
+		$sql = "SELECT DISTINCT c.folio, c.sol_traspaso, CONCAT(c.fec_traspaso, ' 00:00:00') AS fec_traspaso,
+               c.saldo, c.semana, c.cancelacion, c.fec_tramite, c.pplus,
+               sc.clave, sc.fecha_captura, sc.medio_cancelacion, eu.nombre,
+               ee.sc AS estruc_sc, ee.brocker AS estruc_brocker, g.gerencia AS estruc_gerencia
+        FROM clawback c
+        INNER JOIN retenciones_captura sc 
+            ON c.folio = sc.folio
+            AND sc.activo = 1
+            AND sc.id = (
+                SELECT MAX(r2.id) 
+                FROM retenciones_captura r2 
+                WHERE r2.folio = c.folio AND r2.activo = 1
+            )
+        INNER JOIN empl_usuarios eu ON sc.clave = eu.clave
+        LEFT JOIN estruc_empleados ee ON ee.clave = sc.clave
+        LEFT JOIN gerencias g ON g.id_gerencia = ee.id_gerencia
+        WHERE c.semana = '$semanaEsc'";
 
 		/* Whitelist estricta: solo '0' o '1' agregan el filtro. Cualquier otro
 		valor (incluido '' de "Todos") lo deja sin filtrar por cancelación. */

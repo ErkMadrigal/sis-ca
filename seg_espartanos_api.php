@@ -46,11 +46,12 @@ $action = $input['action'] ?? '';
 
 /* ════════════════════════════════════════════════════════════
    Espartanos: listado (deportenis=1 + no_prom_dep='ESPARTANO' en
-   carobra.empleados), armado de 3 equipos con meta individual por
-   persona, lugar final por equipo (1er/2o/3er) y premio en $ por
-   lugar. Asignar equipo/meta, definir lugar final y editar premios
-   son acciones de admin (nivel 12) -- listar y ver equipos es de
-   cualquiera con sesión válida.
+   carobra.empleados), equipos con meta individual por persona y un
+   LÍDER por equipo (espartanos_equipos.clave = clave del espartano
+   líder), lugar final por equipo (1er/2o/3er) y premio en $ por
+   lugar. Asignar equipo/meta, crear/editar equipos y editar premios
+   son acciones de admin -- listar y ver equipos es de cualquiera con
+   sesión válida.
 ════════════════════════════════════════════════════════════ */
 
 function responderError($msg) {
@@ -62,6 +63,15 @@ function requiereAdmin($esAdmin) {
     if (!$esAdmin) {
         responderError('No tienes permiso para hacer esto (se requiere nivel administrador).');
     }
+}
+
+/* ¿Existe ese equipo en espartanos_equipos? (los equipos ya no son
+   solo 1, 2 y 3: se pueden crear más). */
+function existeEquipo($conecta, $idEquipo) {
+    $idEquipo = intval($idEquipo);
+    if ($idEquipo < 1) return false;
+    $bd = $conecta->consulta("Select id_equipo from carobra_2014.espartanos_equipos where id_equipo=$idEquipo");
+    return ($bd && mysqli_num_rows($bd) > 0);
 }
 
 if ($action === 'listarEspartanos') {
@@ -106,14 +116,17 @@ if ($action === 'listarEspartanos') {
 
 if ($action === 'getEquipos') {
 
-    $query = "Select eq.id_equipo, eq.nombre, eq.lugar_final,
+    /* clave = líder del equipo (espartano); su nombre sale de
+       carobra.usuarios igual que en el resto de las consultas. */
+    $query = "Select eq.id_equipo, eq.nombre, eq.lugar_final, eq.clave as lider_clave, ul.nombre as lider_nombre,
                       count(a.clave) as miembros,
                       ifnull(sum(a.meta_individual),0) as suma_metas,
                       pr.monto as premio
                 from carobra_2014.espartanos_equipos eq
                     left join carobra_2014.espartanos_asignaciones a on (a.id_equipo = eq.id_equipo)
                     left join carobra_2014.espartanos_premios pr on (pr.lugar = eq.lugar_final)
-                group by eq.id_equipo, eq.nombre, eq.lugar_final, pr.monto
+                    left join carobra.usuarios ul on (ul.clave = eq.clave)
+                group by eq.id_equipo, eq.nombre, eq.lugar_final, eq.clave, ul.nombre, pr.monto
                 order by eq.id_equipo";
 
     $bd = $conecta->consulta($query);
@@ -124,12 +137,14 @@ if ($action === 'getEquipos') {
     $equipos = [];
     while ($row = mysqli_fetch_assoc($bd)) {
         $equipos[] = [
-            'id_equipo'   => intval($row['id_equipo']),
-            'nombre'      => $row['nombre'],
-            'lugar_final' => $row['lugar_final'] !== null ? intval($row['lugar_final']) : null,
-            'miembros'    => intval($row['miembros']),
-            'suma_metas'  => floatval($row['suma_metas']),
-            'premio'      => $row['premio'] !== null ? floatval($row['premio']) : 0,
+            'id_equipo'    => intval($row['id_equipo']),
+            'nombre'       => utf8_encode($row['nombre']),
+            'clave'        => $row['lider_clave'] !== null && $row['lider_clave'] !== '' ? $row['lider_clave'] : null,
+            'lider_nombre' => $row['lider_nombre'] !== null ? utf8_encode($row['lider_nombre']) : null,
+            'lugar_final'  => $row['lugar_final'] !== null ? intval($row['lugar_final']) : null,
+            'miembros'     => intval($row['miembros']),
+            'suma_metas'   => floatval($row['suma_metas']),
+            'premio'       => $row['premio'] !== null ? floatval($row['premio']) : 0,
         ];
     }
 
@@ -145,6 +160,68 @@ if ($action === 'getEquipos') {
     exit;
 }
 
+/* Crear (id_equipo = 0) o editar un equipo: nombre + líder, que debe
+   ser un espartano (deportenis=1 y no_prom_dep='ESPARTANO'). */
+if ($action === 'guardarEquipo') {
+
+    requiereAdmin($esAdmin);
+
+    $idEquipo = intval($input['id_equipo'] ?? 0);
+    $nombre   = trim($input['nombre'] ?? '');
+    $clave    = trim($input['clave'] ?? '');
+
+    if ($nombre === '' || mb_strlen($nombre, 'UTF-8') > 50) {
+        responderError('Escribe el nombre del equipo (máximo 50 caracteres).');
+    }
+    if ($clave === '') {
+        responderError('Elige al líder del equipo.');
+    }
+
+    $claveEsc  = mysqli_real_escape_string($conecta->conexion, $clave);
+    $nombreEsc = mysqli_real_escape_string($conecta->conexion, utf8_decode($nombre));
+
+    $bdLider = $conecta->consulta("Select e.clave from carobra.empleados e
+                                    where e.clave='$claveEsc' and e.deportenis = 1 and e.no_prom_dep = 'ESPARTANO'");
+    if (!$bdLider || mysqli_num_rows($bdLider) === 0) {
+        responderError('El líder debe ser un espartano.');
+    }
+
+    if ($idEquipo > 0) {
+
+        if (!existeEquipo($conecta, $idEquipo)) {
+            responderError('El equipo no existe.');
+        }
+
+        $ok = $conecta->consulta("Update carobra_2014.espartanos_equipos
+                                    set nombre='$nombreEsc', clave='$claveEsc'
+                                    where id_equipo=$idEquipo");
+        if (!$ok) {
+            responderError('No se pudo actualizar el equipo: ' . mysqli_error($conecta->conexion));
+        }
+
+        echo json_encode(['status' => 'ok', 'id_equipo' => $idEquipo]);
+        exit;
+    }
+
+    /* Equipo nuevo: id siguiente al más alto (por si id_equipo no es
+       AUTO_INCREMENT en la tabla). lugar_final se queda en NULL. */
+    $bdMax = $conecta->consulta("Select ifnull(max(id_equipo),0) + 1 as nuevo from carobra_2014.espartanos_equipos");
+    $tbMax = $bdMax ? mysqli_fetch_assoc($bdMax) : null;
+    $nuevoId = intval($tbMax['nuevo'] ?? 0);
+    if ($nuevoId < 1) {
+        responderError('No se pudo calcular el id del nuevo equipo.');
+    }
+
+    $ok = $conecta->consulta("Insert into carobra_2014.espartanos_equipos (id_equipo, nombre, clave)
+                                values ($nuevoId, '$nombreEsc', '$claveEsc')");
+    if (!$ok) {
+        responderError('No se pudo crear el equipo: ' . mysqli_error($conecta->conexion));
+    }
+
+    echo json_encode(['status' => 'ok', 'id_equipo' => $nuevoId]);
+    exit;
+}
+
 if ($action === 'asignarEquipoMasivo') {
 
     requiereAdmin($esAdmin);
@@ -156,7 +233,7 @@ if ($action === 'asignarEquipoMasivo') {
     if (!is_array($claves) || empty($claves)) {
         responderError('No seleccionaste a ningún espartano.');
     }
-    if ($idEquipo < 1 || $idEquipo > 3) {
+    if (!existeEquipo($conecta, $idEquipo)) {
         responderError('Equipo inválido.');
     }
     if ($meta < 0) {
@@ -213,7 +290,7 @@ if ($action === 'guardarLugarFinal') {
     $idEquipo   = intval($input['id_equipo'] ?? 0);
     $lugarFinal = $input['lugar_final'] ?? null; // 1, 2, 3 o null para "sin definir"
 
-    if ($idEquipo < 1 || $idEquipo > 3) {
+    if (!existeEquipo($conecta, $idEquipo)) {
         responderError('Equipo inválido.');
     }
 
@@ -394,13 +471,16 @@ if ($action === 'guardarPago') {
 }
 
 /* ════════════════════════════════════════════════════════════
-   Registro de faltas: qué día faltó cada espartano y en qué semana
-   cae esa falta. Las semanas válidas para elegir salen en vivo de
-   la tabla `clawback` (mismo criterio que usa el resto del sistema
-   para nombrar semanas), filtradas a partir de la semana 295.
+   Faltas y retardos: qué día faltó (o llegó tarde) cada espartano
+   y en qué semana cae esa incidencia. Se guardan en la misma tabla
+   espartanos_faltas; la columna `retardo` dice qué es:
+   retardo = 1 -> retardo, retardo = 0 -> falta.
+   Las semanas válidas para elegir salen en vivo de la tabla
+   `clawback` (mismo criterio que usa el resto del sistema para
+   nombrar semanas), filtradas a partir de la semana 295.
    Un mismo espartano + mismo día solo puede tener un registro
    (UNIQUE en la tabla) -- volver a guardar ese día actualiza la
-   semana / quién lo registró en vez de duplicar.
+   semana / el tipo / quién lo registró en vez de duplicar.
 ════════════════════════════════════════════════════════════ */
 
 if ($action === 'listarSemanasFaltas') {
@@ -437,7 +517,7 @@ if ($action === 'listarFaltas') {
         $wSemana = " and f.semana = '$semanaEsc' ";
     }
 
-    $query = "Select f.id, f.clave, u.nombre, f.dia_falta, f.semana, f.registrado_por
+    $query = "Select f.id, f.clave, u.nombre, f.dia_falta, f.semana, f.registrado_por, f.retardo
                 from carobra_2014.espartanos_faltas f
                     left join carobra.usuarios u on (u.clave = f.clave)
                 where 1=1
@@ -446,7 +526,7 @@ if ($action === 'listarFaltas') {
 
     $bd = $conecta->consulta($query);
     if (!$bd) {
-        responderError('Error al consultar las faltas: ' . mysqli_error($conecta->conexion));
+        responderError('Error al consultar las faltas y retardos: ' . mysqli_error($conecta->conexion));
     }
 
     $data = [];
@@ -458,6 +538,7 @@ if ($action === 'listarFaltas') {
             'dia_falta'      => $row['dia_falta'],
             'semana'         => $row['semana'],
             'registrado_por' => $row['registrado_por'],
+            'retardo'        => intval($row['retardo'] ?? 0) === 1,
         ];
     }
 
@@ -472,12 +553,13 @@ if ($action === 'guardarFalta') {
     $clave    = trim($input['clave']     ?? '');
     $diaFalta = trim($input['dia_falta'] ?? ''); // yyyy-mm-dd, viene de <input type="date">
     $semana   = trim($input['semana']    ?? '');
+    $retardo  = !empty($input['retardo']) ? 1 : 0;   // 1 = retardo, 0 = falta
 
     if ($clave === '') {
         responderError('Falta elegir al espartano.');
     }
     if ($diaFalta === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $diaFalta)) {
-        responderError('Falta el día de la falta.');
+        responderError('Falta el día de la incidencia.');
     }
     if ($semana === '') {
         responderError('Falta elegir la semana.');
@@ -489,13 +571,13 @@ if ($action === 'guardarFalta') {
     $claveSesionEsc = mysqli_real_escape_string($conecta->conexion, $claveSesion);
 
     $ok = $conecta->consulta(
-        "Insert into carobra_2014.espartanos_faltas (clave, dia_falta, semana, registrado_por)
-            values ('$claveEsc', '$diaFaltaEsc', '$semanaEsc', '$claveSesionEsc')
-            on duplicate key update semana='$semanaEsc', registrado_por='$claveSesionEsc'"
+        "Insert into carobra_2014.espartanos_faltas (clave, dia_falta, semana, registrado_por, retardo)
+            values ('$claveEsc', '$diaFaltaEsc', '$semanaEsc', '$claveSesionEsc', $retardo)
+            on duplicate key update semana='$semanaEsc', registrado_por='$claveSesionEsc', retardo=$retardo"
     );
 
     if (!$ok) {
-        responderError('No se pudo registrar la falta: ' . mysqli_error($conecta->conexion));
+        responderError('No se pudo registrar la incidencia: ' . mysqli_error($conecta->conexion));
     }
 
     echo json_encode(['status' => 'ok']);
@@ -508,12 +590,12 @@ if ($action === 'eliminarFalta') {
 
     $id = intval($input['id'] ?? 0);
     if ($id <= 0) {
-        responderError('Falta la falta a eliminar.');
+        responderError('Falta el registro a eliminar.');
     }
 
     $ok = $conecta->consulta("Delete from carobra_2014.espartanos_faltas where id=$id");
     if (!$ok) {
-        responderError('No se pudo eliminar la falta: ' . mysqli_error($conecta->conexion));
+        responderError('No se pudo eliminar el registro: ' . mysqli_error($conecta->conexion));
     }
 
     echo json_encode(['status' => 'ok']);

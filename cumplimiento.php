@@ -621,8 +621,8 @@
 							<select name="sel-periodo" id="sel-periodo" class="form-control form-control-sm carobra" required>
 								<option value=""></option>
 								<?php
-									$sqlPeriodos = "Select DISTINCT LEFT(campana,10) as periodo 
-													FROM carobra_2014.fec_cierre_campana 
+									$sqlPeriodos = "Select DISTINCT LEFT(campana,10) as periodo
+													FROM carobra_2014.fec_cierre_campana
 													WHERE STR_TO_DATE(fec_ini,'%d/%m/%Y') >= '2026-04-11'
 													ORDER BY periodo";
 									$resPeriodos = $conecta->consulta($sqlPeriodos);
@@ -731,7 +731,7 @@
 					<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
 						<h4 style="margin:0;">ESQUEMA DE COMISIONES</h4>
 						<button id="btn-exportar-xlsx" style="
-							display:flex; align-items:center; gap:6px;
+							display:none; align-items:center; gap:6px;
 							padding:7px 16px;
 							background:#185FA5; color:#fff;
 							border:none; border-radius:8px;
@@ -849,6 +849,12 @@
 
 	<script type="text/javascript">
 
+    // Marcador de versión -- si al abrir la consola (F12) NO ves esta
+    // línea con esta fecha, el navegador está usando una copia vieja en
+    // caché de este archivo y no la que se acaba de subir. Haz
+    // Ctrl+Shift+R (recarga forzada) para descartar esa duda.
+    console.log('%cseg_cumplimiento.php -- build 2026-09-21b (diley movido al backend, dentro del propio getDetalle + botón oculto hasta confirmar completo)', 'color:#185FA5;font-weight:bold;');
+
     var usrPruebas = <?= json_encode($usrPruebas ?? false) ?>;
     var namePruebasUsr = <?= json_encode($namePruebasUsr ?? '') ?>;
     var nivel = <?= json_encode($nivel) ?>;
@@ -915,7 +921,21 @@
     // =========================
     // OBTENER CUMPLIMIENTO
     // =========================
+
+    // Contador de peticiones + bandera de "detalle listo": antes se
+    // podía dar clic en "Exportar XLSX" mientras la precarga del
+    // detalle (getDetalle de TODO el periodo) todavía estaba en vuelo
+    // -- el xlsx salía con lo que hubiera llegado hasta ese momento
+    // (por eso a veces 2,155 de 3,948 filas) en vez de esperar a que
+    // terminara. Ahora se bloquean Buscar/Exportar mientras carga, y
+    // el id de petición evita que una búsqueda vieja pise los
+    // resultados de una más nueva si alguien le da doble clic a Buscar.
+    var _cumplimientoReqId = 0;
+    window._detalleListo = true;
+
     async function obtenerCumplimiento() {
+
+        const miReqId = ++_cumplimientoReqId;
 
         const periodo  = document.getElementById("sel-periodo").value;
         const anio     = document.getElementById("anio").value;
@@ -924,7 +944,22 @@
         const brocker  = document.getElementById("txt-brocker-nombre")?.value ?? "";
         const gerencia = document.getElementById("txt-gerencia-nombre")?.value ?? "";
 
-        const tbody = document.getElementById("body-detalles");
+        const tbody       = document.getElementById("body-detalles");
+        const btnBuscar   = document.getElementById("buscar");
+        const btnExportar = document.getElementById("btn-exportar-xlsx");
+        const textoOriginalExportar = btnExportar.innerHTML;
+
+        // Mientras no termine de cargar TODO (esquema + detalle
+        // completo), el botón de exportar NI SIQUIERA SE MUESTRA -- no
+        // es nada más "disabled" (eso se podía saltar), directamente no
+        // existe en pantalla hasta que se confirme que el detalle está
+        // 100% completo (ver más abajo, comparación contra COUNT(*) real).
+        window._detalleListo   = false;
+        window._detalleEstable = false;
+        btnBuscar.disabled     = true;
+        btnExportar.disabled   = true;
+        btnExportar.style.display = 'none';
+        btnExportar.innerHTML = '⏳ Cargando información...';
 
         tbody.innerHTML = `
             <tr>
@@ -944,6 +979,12 @@
             });
 
             const result = await response.json();
+
+            // Si mientras esta petición viajaba ya se lanzó OTRA búsqueda
+            // más nueva, esta respuesta quedó obsoleta -- se descarta en
+            // vez de pisar los resultados/el estado de la búsqueda vigente.
+            if (miReqId !== _cumplimientoReqId) return;
+
             window._datosEsquema = result.data || [];
 
             if (result.status == "error") {
@@ -980,7 +1021,7 @@
                 const ret_iva = parseFloat(row.ret_iva     || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const ret_isr = parseFloat(row.ret_isr     || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const total   = parseFloat(row.total       || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            
+
                 tbody.innerHTML += `
                     <tr onclick='abrirDetalleCumplimiento(${JSON.stringify(row)})'>
                         <td class="td-persona">${row.sc       ?? ''}</td>
@@ -1010,24 +1051,49 @@
 
             ajustarAltoTablaComisiones();
 
-            // Precarga el detalle de TODOS los NAPs en paralelo
-            // (usa periodo y anio ya declarados arriba, sin redeclararlos)
-            window._todoElDetalle = [];
+            // ── Precarga del detalle para TODOS los NAPs del periodo ──
+            // El diley ya NO se hace aquí en el navegador: ahora vive
+            // adentro de la propia consulta "getDetalle" en
+            // cumplimiento_api.php (un sleep() antes del SELECT), para
+            // darle tiempo a que la info esté completa antes de leerla.
+            // Aquí nomás se espera a que ese fetch regrese -- por eso va
+            // a tardar ~20s de más, y el botón de exportar se queda
+            // oculto mientras tanto.
+            window._todoElDetalle  = [];
+            window._detalleEstable = false;
 
-            const promesas = result.data.map(row =>
-                fetch("cumplimiento_api.php", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ action: "getDetalle", nap: row.nap, anio, periodo })
-                })
-                .then(r => r.json())
-                .then(r => {
-                    if (r.data) window._todoElDetalle.push(...r.data);
-                })
-                .catch(() => {})
-            );
+            try {
+                if (btnExportar) {
+                    btnExportar.innerHTML = '⏳ Cargando detalle completo...';
+                }
 
-            await Promise.all(promesas);
+                if (miReqId !== _cumplimientoReqId) {
+                    // hubo una búsqueda más nueva mientras se esperaba, se aborta esta
+                } else {
+                    const respDet = await fetch("cumplimiento_api.php", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "getDetalle", nap: "", anio, periodo })
+                    });
+                    const jsonDet = await respDet.json();
+
+                    if (jsonDet.status === "error") {
+                        console.error("Error al precargar detalle:", jsonDet.message);
+                    } else if (miReqId === _cumplimientoReqId) {
+                        window._todoElDetalle = jsonDet.data || [];
+                        // OJO: si llegó "ok" pero con 0 filas, NO se marca como
+                        // completo -- normalmente sí hay registros para un
+                        // periodo con esquema de comisiones, así que un
+                        // arreglo vacío es señal de que algo se cortó (o de
+                        // plano no hay nada que exportar). El botón se queda
+                        // oculto y se avisa en vez de exportar un "Detalle"
+                        // vacío calladito.
+                        window._detalleEstable = window._todoElDetalle.length > 0;
+                    }
+                }
+            } catch (eDet) {
+                console.error("Error de comunicación al precargar detalle:", eDet);
+            }
 
         } catch (error) {
             //console.error(error);
@@ -1040,6 +1106,34 @@
                 </tr>
             `;
             ajustarAltoTablaComisiones();
+        } finally {
+            // Solo la petición más reciente reactiva los botones -- si
+            // ya hay otra búsqueda más nueva en curso, esa es la que
+            // manda y la que va a reactivarlos cuando termine.
+            if (miReqId === _cumplimientoReqId) {
+                window._detalleListo = true;
+                btnBuscar.disabled   = false;
+                btnExportar.disabled = false;
+                btnExportar.innerHTML = textoOriginalExportar;
+
+                if (window._detalleEstable) {
+                    // Detalle confirmado completo (coincide con el
+                    // COUNT(*) real) -- AHORA SÍ aparece el botón.
+                    btnExportar.style.display = 'flex';
+                } else {
+                    // Nunca se pudo confirmar que esté completo dentro
+                    // del tiempo de espera -- el botón se queda oculto
+                    // y se avisa en su lugar en vez de arriesgarse a
+                    // dejar exportar algo a medias.
+                    btnExportar.style.display = 'none';
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'No se pudo confirmar que el detalle esté completo',
+                        html: `Se esperó varios minutos y "Detalle" nunca alcanzó el total real de filas (última lectura: <b>${(window._todoElDetalle||[]).length.toLocaleString('es-MX')}</b>). El botón de exportar se quedó oculto para no arriesgar un xlsx incompleto.<br><br>Vuelve a darle "Buscar" para intentarlo de nuevo.`,
+                        confirmButtonColor: '#a06b00'
+                    });
+                }
+            }
         }
     }
 
@@ -1273,7 +1367,33 @@
     // =========================
     // EXPORTAR XLSX PRINCIPAL
     // =========================
-    document.getElementById("btn-exportar-xlsx").addEventListener("click", function () {
+    document.getElementById("btn-exportar-xlsx").addEventListener("click", async function () {
+
+        // Respaldo por si el botón se llegara a habilitar antes de tiempo
+        // (el candado principal es que queda disabled mientras carga) --
+        // sin esto se podía exportar con el detalle a medias.
+        if (!window._detalleListo) {
+            Swal.fire({ icon: "info", title: "Espera un momento", text: "Todavía se está cargando el detalle completo del periodo. Intenta de nuevo en unos segundos." });
+            return;
+        }
+
+        // El conteo de "Detalle" nunca se estabilizó (dos lecturas
+        // seguidas con el mismo número de filas) durante la espera --
+        // lo más probable es que algo más siga escribiendo en
+        // cumplimiento/producción para este periodo. Se avisa en vez de
+        // exportar calladito con algo que puede seguir incompleto.
+        if (window._todoElDetalle && window._todoElDetalle.length > 0 && !window._detalleEstable) {
+            const confirmacion = await Swal.fire({
+                icon: 'warning',
+                title: 'La información de "Detalle" no se terminó de estabilizar',
+                html: `Se estuvo esperando varios minutos y el número de filas de "Detalle" seguía cambiando (última lectura: <b>${window._todoElDetalle.length.toLocaleString('es-MX')}</b> filas). Es probable que algo más siga escribiendo en cumplimiento/producción para este periodo ahorita mismo.<br><br>¿Exportar de todos modos con lo último que se leyó, o prefieres esperar y volver a buscar en un rato?`,
+                showCancelButton: true,
+                confirmButtonText: 'Exportar de todos modos',
+                cancelButtonText: 'Mejor espero',
+                confirmButtonColor: '#a06b00'
+            });
+            if (!confirmacion.isConfirmed) return;
+        }
 
         if (!window._datosEsquema || window._datosEsquema.length === 0) {
             Swal.fire({ icon: "warning", title: "Sin datos", text: "Busca primero para exportar." });
@@ -1431,7 +1551,7 @@
     const pfBackdrop = document.getElementById("pfBackdrop");
 
     const PREFACTURA_RECEPTOR = {
-        nombre:  "DARACA ASESORES EN PENSIONES",   
+        nombre:  "DARACA ASESORES EN PENSIONES",
         rfc:     "DAP1909217J6",
         regimen: "601 - General de Ley Personas Morales",
         cp:      "45030",

@@ -206,7 +206,7 @@ session_start();
         $divcabecera->crear();
             $imgcabecera->crear(); $imgcabecera->css("width","100%");
             titulo("Captura de prestamos Bancrea");
-            $pag = "BANCREA"; 
+            $pag = "BANCREA";
             menu();
         $divcabecera->close();
         $divpie->crear();
@@ -241,7 +241,7 @@ session_start();
                     <div class="col-1-2">
                         <label>Folio <small style="color:#aaa;">(10–15 caracteres)</small></label>
                         <input type="text" id="folio" placeholder="Escribe el folio..."
-                            minlength="10" maxlength="15" oninput="validarFolio(this)" />
+                            minlength="10" maxlength="15" oninput="onFolioInput(this)" />
                         <span class="pct-hint" id="hint_folio"></span>
                     </div>
                     <div class="col-1-2">
@@ -455,7 +455,7 @@ session_start();
 
                 <!-- CLABE -->
                 <div>
-                    <label>CLABE interbancaria <small style="color:#aaa;">(18 dígitos)</small></label>
+                    <label>CLABE interbancaria <small style="color:#aaa;" id="ext-clabe-req-hint">(18 dígitos)</small></label>
                     <input type="text" id="ext_clabe"
                         placeholder="000000000000000000"
                         maxlength="18"
@@ -540,6 +540,129 @@ session_start();
         }
     };
 
+    /* ── FOLIO EXISTENTE: autocompletar + bloqueo si ya tiene fec_pago ── */
+    var debounceFolio    = null;
+    var folioBloqueado   = false;
+    var folioModoEdicion = false;
+    var CAMPOS_BLOQUEO   = ['cliente', 'saldo', 'asesor_search', 'porcen_ase', 'porcen_ger', 'porcen_sc', 'fec_captura'];
+
+    window.onFolioInput = function (inp) {
+        validarFolio(inp);
+        clearTimeout(debounceFolio);
+        desbloquearFormulario();
+
+        var folio = inp.value.trim();
+        if (folio.length < 10) return;
+
+        debounceFolio = setTimeout(function () {
+            apiPost({ action: 'buscarFolio', folio: folio }).then(function (res) {
+                if (!res || res.status !== 'ok' || !res.existe) return;
+
+                precargarDesdeFolio(res.data);
+
+                if (res.bloqueado) {
+                    bloquearFormulario(res.fec_pago);
+                } else {
+                    folioModoEdicion = true;
+                    var hint = document.getElementById('hint_folio');
+                    hint.textContent = 'Folio existente — modo edición (aún sin fecha de pago)';
+                    hint.className   = 'pct-hint';
+                    hint.style.color = '#1a56db';
+                    document.getElementById('btn-guardar').textContent = 'Actualizar comprobante';
+                }
+            }).catch(function () { /* silencioso: si falla la búsqueda, se comporta como folio nuevo */ });
+        }, 400);
+    };
+
+    function precargarDesdeFolio(data) {
+        document.getElementById('cliente').value = data.cliente || '';
+        document.getElementById('saldo').value    = data.saldo  || '';
+        if (data.fec_captura) document.getElementById('fec_captura').value = data.fec_captura;
+
+        inputAsesor.value = data.asesor_nombre || '';
+        document.getElementById('asesor_clave').value      = data.asesor_clave || '';
+        document.getElementById('asesor_es_externo').value = data.asesor_externo ? '1' : '0';
+        if (data.asesor_clave) {
+            document.getElementById('asesor_badge_txt').textContent    = data.asesor_nombre + ' (' + data.asesor_clave + ')';
+            document.getElementById('asesor_badge_wrap').style.display = 'block';
+        }
+        document.getElementById('asesor_nombre_display').textContent = data.asesor_nombre || '';
+        document.getElementById('asesor_clave_display').textContent  = data.asesor_clave  || '';
+
+        document.getElementById('gerente').value                      = data.gerente_clave || '';
+        document.getElementById('gerente_nombre_display').textContent = data.gerente_nombre || '—';
+        document.getElementById('gerente_clave_display').textContent  = data.gerente_clave  || '';
+
+        document.getElementById('sc').value                      = data.sc_clave  || '';
+        document.getElementById('sc_nombre_display').textContent = data.sc_nombre || '—';
+        document.getElementById('sc_clave_display').textContent  = data.sc_clave  || '';
+
+        document.getElementById('porcen_ase').value = data.porcen_ase || '';
+        document.getElementById('porcen_ger').value = data.porcen_ger || '';
+        document.getElementById('porcen_sc').value  = data.porcen_sc  || '';
+
+        agregarBtnCambiarEstructura('gerente');
+        agregarBtnCambiarEstructura('sc');
+
+        document.getElementById('sec-estructura-comisiones').style.display = 'block';
+        document.getElementById('breadcrumb-estructura').style.display     = 'none';
+        document.getElementById('nota-sc').style.display                   = 'none';
+        document.getElementById('btn-agregar-ext').classList.remove('visible');
+
+        recalcular();
+    }
+
+    /* Botón "✎ Cambiar" para gerente/sc -- siempre visible en modo edición
+       de folio, tengan o no un valor ya asignado, así se puede reasignar
+       la estructura completa de un comprobante ya capturado. */
+    function agregarBtnCambiarEstructura(rol) {
+        var idBtn      = 'btn-cambiar-' + rol;
+        var idDisplay  = (rol === 'gerente' ? 'gerente_nombre_display' : 'sc_nombre_display');
+        var label      = (rol === 'gerente' ? 'Gerente' : 'SC');
+
+        var viejo = document.getElementById(idBtn);
+        if (viejo) viejo.remove();
+        var btnAddViejo = document.getElementById('btn-add-' + (rol === 'gerente' ? 'ger' : 'sc'));
+        if (btnAddViejo) btnAddViejo.remove();
+
+        var cardLeft = document.getElementById(idDisplay).closest('.card-comision-left');
+        var btn = document.createElement('button');
+        btn.id        = idBtn;
+        btn.innerHTML = '&#9998; Cambiar ' + label;
+        btn.style.cssText =
+            'margin-top:4px;background:#e8f0fe;color:#1a56db;border:1px solid #c0d4fc;' +
+            'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
+            'cursor:pointer;font-family:inherit;';
+        btn.addEventListener('click', function () { abrirModalExternoParaRol(rol, ''); });
+        cardLeft.appendChild(btn);
+    }
+
+    function bloquearFormulario(fecPago) {
+        folioBloqueado = true;
+        CAMPOS_BLOQUEO.forEach(function (id) { document.getElementById(id).disabled = true; });
+
+        var btn = document.getElementById('btn-guardar');
+        btn.disabled    = true;
+        btn.textContent = 'Ya pagado el ' + fecPago + ' — no se puede modificar';
+
+        var hint = document.getElementById('hint_folio');
+        hint.textContent = 'Este comprobante ya tiene fecha de pago (' + fecPago + ') y está bloqueado.';
+        hint.className    = 'pct-hint over';
+        hint.style.color  = '';
+    }
+
+    function desbloquearFormulario() {
+        if (!folioBloqueado && !folioModoEdicion) return;
+        folioBloqueado   = false;
+        folioModoEdicion = false;
+        CAMPOS_BLOQUEO.forEach(function (id) { document.getElementById(id).disabled = false; });
+        var btn = document.getElementById('btn-guardar');
+        btn.disabled    = false;
+        btn.textContent = 'Guardar comprobante';
+        var hint = document.getElementById('hint_folio');
+        hint.style.color = '';
+    }
+
     function apiPost(payload) {
         return fetch(API, {
             method: 'POST',
@@ -585,39 +708,141 @@ session_start();
         setTimeout(function () { dropAsesor.classList.remove('open'); }, 200);
     });
 
+    /* Búsqueda de asesor: internos (empl_usuarios) + externos nivel 3 */
     function fetchAsesores(q) {
-        apiPost({ action: 'buscarAsesor', q: q }).then(function (res) {
+        Promise.all([
+            apiPost({ action: 'buscarAsesor',        q: q }),
+            apiPost({ action: 'buscarAsesorExterno', q: q })
+        ]).then(function (results) {
+            var resInt = results[0];
+            var resExt = results[1];
+
             dropAsesor.innerHTML = '';
-            if (!res.data || res.data.length === 0) {
-                dropAsesor.innerHTML = '<div class="ta-vacio">Sin resultados para "' + q + '"</div>';
-                dropAsesor.classList.add('open'); return;
+
+            var todos = [];
+            (resInt.data || []).forEach(function (item) {
+                if (!item.externo) todos.push({ clave: item.clave, nombre: item.nombre, externo: false });
+            });
+            (resExt.data || []).forEach(function (item) {
+                todos.push({
+                    clave:    'EXT_' + item.id,
+                    nombre:   item.nombre,
+                    externo:  true,
+                    gerencia: item.gerencia,
+                    sc:       item.sc,
+                    clabe:    item.clabe,
+                    banco:    item.banco
+                });
+            });
+
+            todos.sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+
+            if (todos.length === 0) {
+                dropAsesor.innerHTML = '<div class="ta-vacio">Sin resultados — usa + para agregar externo</div>';
+                dropAsesor.classList.add('open');
+                return;
             }
-            res.data.forEach(function (item) {
+
+            todos.forEach(function (item) {
                 var d = document.createElement('div');
                 d.className = 'ta-item';
-                d.innerHTML = '<span class="ta-nombre">' + resaltar(item.nombre, q) + '</span><span class="ta-clave">' + item.clave + '</span>';
+                var tag = item.externo ? '<span class="badge-ext-tag">Externo</span>' : '';
+                d.innerHTML = '<span class="ta-nombre">' + resaltar(item.nombre, q) + tag + '</span>'
+                            + '<span class="ta-clave">' + item.clave + '</span>';
                 d.addEventListener('mousedown', function () { seleccionarAsesor(item); });
                 dropAsesor.appendChild(d);
             });
+
             dropAsesor.classList.add('open');
-        }).catch(function () { dropAsesor.innerHTML = '<div class="ta-vacio">Error al buscar</div>'; });
+        }).catch(function () {
+            dropAsesor.innerHTML = '<div class="ta-vacio">Error al buscar</div>';
+        });
     }
 
-    function seleccionarAsesor(item) {
+    /* Selección de asesor: interno -> carga estructura normal;
+       externo -> estructura simplificada (sin comisiones ger/sc) */
+    window.seleccionarAsesor = function (item) {
         inputAsesor.value = item.nombre;
-        document.getElementById('asesor_clave').value = item.clave;
-        document.getElementById('asesor_badge_txt').textContent = item.nombre + ' (' + item.clave + ')';
+        document.getElementById('asesor_clave').value              = item.clave;
+        document.getElementById('asesor_es_externo').value         = item.externo ? '1' : '0';
+        document.getElementById('asesor_badge_txt').textContent    = item.nombre + ' (' + item.clave + ')';
         document.getElementById('asesor_badge_wrap').style.display = 'block';
+        document.getElementById('btn-agregar-ext').classList.remove('visible');
         dropAsesor.classList.remove('open');
-        cargarEstructura(item.clave);
-    }
+
+        if (item.externo) {
+            document.getElementById('loader-estructura').style.display = 'none';
+            document.getElementById('asesor_nombre_display').textContent = item.nombre;
+            document.getElementById('asesor_clave_display').textContent  = item.clave;
+
+            /* La gerencia/SC guardada en asesores_externos NO se usa para
+               precargar: puede cambiar con el tiempo, así que siempre se
+               vuelve a capturar manualmente para cada comprobante. */
+            document.getElementById('gerente').value                      = '';
+            document.getElementById('gerente_nombre_display').textContent = '—';
+            document.getElementById('gerente_clave_display').textContent  = '';
+            document.getElementById('sc').value                           = '';
+            document.getElementById('sc_nombre_display').textContent      = '—';
+            document.getElementById('sc_clave_display').textContent       = '';
+
+            document.getElementById('sec-estructura-comisiones').style.display = 'block';
+            document.getElementById('breadcrumb-estructura').style.display     = 'none';
+            document.getElementById('nota-sc').style.display                   = 'none';
+            document.getElementById('titulo-sc').textContent                   = 'SC';
+
+            document.getElementById('porcen_ger').value    = '';
+            document.getElementById('porcen_sc').value     = '';
+            document.getElementById('porcen_ger').disabled = false;
+            document.getElementById('porcen_sc').disabled  = false;
+            document.getElementById('comision_ger').value  = '';
+            document.getElementById('comision_sc').value   = '';
+
+            var btnGerOld = document.getElementById('btn-add-ger');
+            var btnScOld  = document.getElementById('btn-add-sc');
+            if (btnGerOld) btnGerOld.remove();
+            if (btnScOld)  btnScOld.remove();
+
+            var cardGerLeft = document.getElementById('gerente_nombre_display').closest('.card-comision-left');
+            var btnGer = document.createElement('button');
+            btnGer.id        = 'btn-add-ger';
+            btnGer.innerHTML = '+ Agregar gerente externo';
+            btnGer.style.cssText =
+                'margin-top:4px;background:#fff3cd;color:#856404;border:1px solid #ffe69c;' +
+                'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
+                'cursor:pointer;font-family:inherit;';
+            btnGer.addEventListener('click', function () { abrirModalExternoParaRol('gerente', ''); });
+            cardGerLeft.appendChild(btnGer);
+
+            var cardScLeft = document.getElementById('sc_nombre_display').closest('.card-comision-left');
+            var btnSc = document.createElement('button');
+            btnSc.id        = 'btn-add-sc';
+            btnSc.innerHTML = '+ Agregar SC externo';
+            btnSc.style.cssText =
+                'margin-top:4px;background:#fff3cd;color:#856404;border:1px solid #ffe69c;' +
+                'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
+                'cursor:pointer;font-family:inherit;';
+            btnSc.addEventListener('click', function () { abrirModalExternoParaRol('sc', ''); });
+            cardScLeft.appendChild(btnSc);
+
+            document.getElementById('porcen_ase').focus();
+
+        } else {
+            document.getElementById('porcen_ger').disabled = false;
+            document.getElementById('porcen_sc').disabled  = false;
+            cargarEstructura(item.clave);
+        }
+    };
 
     window.limpiarAsesor = function () {
         inputAsesor.value = '';
         document.getElementById('asesor_clave').value                      = '';
+        document.getElementById('asesor_es_externo').value                 = '0';
         document.getElementById('asesor_badge_wrap').style.display         = 'none';
         document.getElementById('sec-estructura-comisiones').style.display = 'none';
         document.getElementById('loader-estructura').style.display         = 'none';
+        document.getElementById('btn-agregar-ext').classList.remove('visible');
+        document.getElementById('porcen_ger').disabled                     = false;
+        document.getElementById('porcen_sc').disabled                      = false;
         document.getElementById('gerente').value                           = '';
         document.getElementById('gerente_nombre_display').textContent      = '';
         document.getElementById('gerente_clave_display').textContent       = '';
@@ -636,8 +861,21 @@ session_start();
         dropAsesor.classList.remove('open');
     };
 
+    /* Mostrar btn + cuando el typeahead tiene texto y no hay asesor seleccionado */
+    inputAsesor.addEventListener('input', function () {
+        var btn = document.getElementById('btn-agregar-ext');
+        var tieneTexto     = this.value.trim().length >= 2;
+        var tieneSeleccion = document.getElementById('asesor_clave').value !== '';
+        if (tieneTexto && !tieneSeleccion) {
+            btn.classList.add('visible');
+            btn.dataset.nombre = this.value.trim();
+        } else {
+            btn.classList.remove('visible');
+        }
+    });
+
     /* ── CARGAR ESTRUCTURA ── */
-        window.cargarEstructura = function (clave) {
+    window.cargarEstructura = function (clave) {
         document.getElementById('sec-estructura-comisiones').style.display = 'none';
         document.getElementById('loader-estructura').style.display         = 'flex';
 
@@ -660,13 +898,11 @@ session_start();
                 document.getElementById('nota-sc').style.display              = 'none';
                 document.getElementById('sec-estructura-comisiones').style.display = 'block';
 
-                /* Quitar btns anteriores */
                 var btnGerOld = document.getElementById('btn-add-ger');
                 var btnScOld  = document.getElementById('btn-add-sc');
                 if (btnGerOld) btnGerOld.remove();
                 if (btnScOld)  btnScOld.remove();
 
-                /* Mostrar "Sin gerente" con btn + */
                 var cardGerLeft = document.getElementById('gerente_nombre_display').closest('.card-comision-left');
                 document.getElementById('gerente_nombre_display').textContent = '—';
                 document.getElementById('gerente_clave_display').textContent  = '';
@@ -678,12 +914,9 @@ session_start();
                     'margin-top:4px;background:#fff3cd;color:#856404;border:1px solid #ffe69c;' +
                     'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
                     'cursor:pointer;font-family:inherit;';
-                btnGer.addEventListener('click', function(){
-                    abrirModalExternoParaRol('gerente', '');
-                });
+                btnGer.addEventListener('click', function () { abrirModalExternoParaRol('gerente', ''); });
                 cardGerLeft.appendChild(btnGer);
 
-                /* Mostrar "Sin SC" con btn + */
                 var cardScLeft = document.getElementById('sc_nombre_display').closest('.card-comision-left');
                 document.getElementById('sc_nombre_display').textContent = '—';
                 document.getElementById('sc_clave_display').textContent  = '';
@@ -695,9 +928,7 @@ session_start();
                     'margin-top:4px;background:#fff3cd;color:#856404;border:1px solid #ffe69c;' +
                     'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
                     'cursor:pointer;font-family:inherit;';
-                btnSc.addEventListener('click', function(){
-                    abrirModalExternoParaRol('sc', '');
-                });
+                btnSc.addEventListener('click', function () { abrirModalExternoParaRol('sc', ''); });
                 cardScLeft.appendChild(btnSc);
 
                 document.getElementById('porcen_ase').focus();
@@ -712,7 +943,6 @@ session_start();
             document.getElementById('gerente_nombre_display').textContent = res.nombre_ger || res.gerencia;
             document.getElementById('gerente_clave_display').textContent  = res.gerencia;
 
-            /* Btn + gerente si no encontrado */
             var btnGerOld = document.getElementById('btn-add-ger');
             if (btnGerOld) btnGerOld.remove();
 
@@ -726,9 +956,7 @@ session_start();
                     'margin-top:4px;background:#fff3cd;color:#856404;border:1px solid #ffe69c;' +
                     'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
                     'cursor:pointer;font-family:inherit;';
-                btnGer.addEventListener('click', function(){
-                    abrirModalExternoParaRol('gerente', res.nombre_ger);
-                });
+                btnGer.addEventListener('click', function () { abrirModalExternoParaRol('gerente', res.nombre_ger); });
                 cardGerLeft.appendChild(btnGer);
             }
 
@@ -748,7 +976,6 @@ session_start();
                 document.getElementById('titulo-sc').textContent = 'SC';
             }
 
-            /* Btn + SC si no encontrado */
             var btnScOld = document.getElementById('btn-add-sc');
             if (btnScOld) btnScOld.remove();
 
@@ -764,9 +991,7 @@ session_start();
                     'margin-top:4px;background:#fff3cd;color:#856404;border:1px solid #ffe69c;' +
                     'border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;' +
                     'cursor:pointer;font-family:inherit;';
-                btnSc.addEventListener('click', function(){
-                    abrirModalExternoParaRol('sc', nombreScDisplay);
-                });
+                btnSc.addEventListener('click', function () { abrirModalExternoParaRol('sc', nombreScDisplay); });
                 cardScLeft.appendChild(btnSc);
             }
 
@@ -817,8 +1042,13 @@ session_start();
         ['porcen_ase','porcen_ger','porcen_sc'].forEach(function (id) { document.getElementById(id).classList.remove('input-error'); });
     }
 
-    /* ── GUARDAR ── */
+    /* ── GUARDAR COMPROBANTE ── */
     window.guardarComprobante = function () {
+        if (folioBloqueado) {
+            Swal.fire({ icon:'warning', title:'Comprobante bloqueado', text:'Este folio ya tiene fecha de pago y no se puede modificar.', confirmButtonColor:'#1a56db' });
+            return;
+        }
+
         var folio       = document.getElementById('folio').value.trim();
         var fec_captura = document.getElementById('fec_captura').value.trim();
         var cliente     = document.getElementById('cliente').value.trim();
@@ -855,75 +1085,74 @@ session_start();
             gerente:gerente, porcen_ger:porcen_ger, comision_ger:comision_ger,
             sc:sc, porcen_sc:porcen_sc, comision_sc:comision_sc
         }).then(function (res) {
-            btn.disabled = false; btn.innerHTML = 'Guardar comprobante';
+            btn.disabled = false; btn.innerHTML = folioModoEdicion ? 'Actualizar comprobante' : 'Guardar comprobante';
             if (res.status === 'ok') {
-                Swal.fire({ icon:'success', title:'¡Guardado!', text:'Comprobante registrado', confirmButtonColor:'#1a56db' })
+                var msgOk = res.actualizado ? 'Comprobante actualizado' : 'Comprobante registrado';
+                Swal.fire({ icon:'success', title:'¡Guardado!', text:msgOk, confirmButtonColor:'#1a56db' })
                     .then(function () { limpiarFormulario(); });
             } else {
                 Swal.fire({ icon:'error', title:'Error', text:res.msg, confirmButtonColor:'#2384c5' });
             }
         }).catch(function () {
-            btn.disabled = false; btn.innerHTML = 'Guardar comprobante';
+            btn.disabled = false; btn.innerHTML = folioModoEdicion ? 'Actualizar comprobante' : 'Guardar comprobante';
             Swal.fire({ icon:'error', title:'Error de conexión', text:'No se pudo conectar con el servidor.', confirmButtonColor:'#1a56db' });
         });
     };
 
     /* ── LIMPIAR TODO ── */
     function limpiarFormulario() {
+        folioBloqueado   = false;
+        folioModoEdicion = false;
+        CAMPOS_BLOQUEO.forEach(function (id) { document.getElementById(id).disabled = false; });
+        var btnG = document.getElementById('btn-guardar');
+        btnG.disabled    = false;
+        btnG.textContent = 'Guardar comprobante';
+
         var fi = document.getElementById('folio');
         fi.value = ''; fi.classList.remove('input-error','input-ok');
         document.getElementById('hint_folio').textContent = '';
         document.getElementById('hint_folio').className   = 'pct-hint';
+        document.getElementById('hint_folio').style.color = '';
         document.getElementById('fec_captura').value = new Date().toISOString().split('T')[0];
         document.getElementById('cliente').value = '';
         document.getElementById('saldo').value   = '';
         limpiarAsesor();
     }
 
-    
-
-    /* ── BUSCAR EXTERNO EXISTENTE ── */
+    /* ── BUSCAR EXTERNO/INTERNO EXISTENTE (dentro del modal +) ── */
     var debExtExistente = null;
 
-    window.onBuscarExternoExistente = function(inp){
+    window.onBuscarExternoExistente = function (inp) {
         clearTimeout(debExtExistente);
         var q    = inp.value.trim();
         var drop = document.getElementById('ext_existente_dropdown');
         var rol  = document.getElementById('modal-ext-overlay').dataset.rol || 'asesor';
 
-        if(q.length < 2){ drop.classList.remove('open'); return; }
+        if (q.length < 2) { drop.classList.remove('open'); return; }
 
-        debExtExistente = setTimeout(function(){
+        debExtExistente = setTimeout(function () {
 
-            /* Si es asesor busca solo en externos, si es gerente/sc busca en ambos */
-            var accion = (rol === 'asesor') ? 'buscarAsesorExterno' : 'buscarParaRol';
-            var payload = (rol === 'asesor')
-                ? { action: accion, q: q }
-                : { action: accion, q: q, rol: rol };
+            /* asesor -> solo externos nivel 3; gerente/sc -> buscarParaRol (interno + externo de ese nivel) */
+            var accion  = (rol === 'asesor') ? 'buscarAsesorExterno' : 'buscarParaRol';
+            var payload = (rol === 'asesor') ? { action: accion, q: q } : { action: accion, q: q, rol: rol };
 
-            apiPost(payload).then(function(res){
+            apiPost(payload).then(function (res) {
                 drop.innerHTML = '';
-                if(!res.data || res.data.length === 0){
+                if (!res.data || res.data.length === 0) {
                     drop.innerHTML = '<div class="ta-vacio">Sin resultados — registra nuevo abajo</div>';
                     drop.classList.add('open'); return;
                 }
-                res.data.forEach(function(item){
+                res.data.forEach(function (item) {
                     var d = document.createElement('div');
                     d.className = 'ta-item';
                     var tag = item.externo
                         ? '<span class="badge-ext-tag">Externo</span>'
                         : '<span style="font-size:10px;color:#fff;background:#38a169;border-radius:4px;padding:1px 7px;margin-left:6px;font-weight:700;">Interno</span>';
                     d.innerHTML = '<span class="ta-nombre">' + resaltar(item.nombre, q) + tag + '</span>';
-                    if(item.externo){
-                        d.innerHTML += '<span class="ta-clave">EXT_' + item.id + '</span>';
-                    }
-                    d.addEventListener('mousedown', function(){
-                        if(item.externo){
-                            seleccionarExternoExistente(item);
-                        } else {
-                            /* Interno — asignar directo por nombre */
-                            seleccionarInternoParaRol(item.nombre);
-                        }
+                    if (item.externo) d.innerHTML += '<span class="ta-clave">EXT_' + item.id + '</span>';
+                    d.addEventListener('mousedown', function () {
+                        if (item.externo) seleccionarExternoExistente(item);
+                        else              seleccionarInternoParaRol(item.nombre);
                     });
                     drop.appendChild(d);
                 });
@@ -932,24 +1161,20 @@ session_start();
         }, 300);
     };
 
-    /* Seleccionar interno (nombre) para gerente/SC */
-    function seleccionarInternoParaRol(nombre){
+    function seleccionarInternoParaRol(nombre) {
         document.getElementById('ext_existente_id').value              = 'INTERNO';
         document.getElementById('ext_existente_badge_txt').textContent = nombre + ' (Interno)';
         document.getElementById('ext_existente_badge').style.display   = 'block';
         document.getElementById('ext_buscar_existente').value          = '';
         document.getElementById('ext_existente_dropdown').classList.remove('open');
-        /* Guardar nombre para asignar */
-        document.getElementById('ext_existente_badge').dataset.nombre = nombre;
+        document.getElementById('ext_existente_badge').dataset.nombre  = nombre;
     }
 
-    document.getElementById('ext_buscar_existente').addEventListener('blur', function(){
-        setTimeout(function(){
-            document.getElementById('ext_existente_dropdown').classList.remove('open');
-        }, 200);
+    document.getElementById('ext_buscar_existente').addEventListener('blur', function () {
+        setTimeout(function () { document.getElementById('ext_existente_dropdown').classList.remove('open'); }, 200);
     });
 
-    function seleccionarExternoExistente(item){
+    function seleccionarExternoExistente(item) {
         document.getElementById('ext_existente_id').value              = item.id;
         document.getElementById('ext_existente_badge_txt').textContent = item.nombre + ' (EXT_' + item.id + ')';
         document.getElementById('ext_existente_badge').style.display   = 'block';
@@ -957,310 +1182,94 @@ session_start();
         document.getElementById('ext_existente_dropdown').classList.remove('open');
     }
 
-    window.limpiarExternoExistente = function(){
+    window.limpiarExternoExistente = function () {
         document.getElementById('ext_existente_id').value              = '';
         document.getElementById('ext_existente_badge').style.display   = 'none';
         document.getElementById('ext_existente_badge_txt').textContent = '';
         document.getElementById('ext_buscar_existente').value          = '';
     };
 
-    /* ── GUARDAR EXTERNO ── */
-    window.guardarAsesorExterno = function(){
-
-        var rol         = document.getElementById('modal-ext-overlay').dataset.rol || 'asesor';
-        var existenteId = document.getElementById('ext_existente_id').value.trim();
-
-        /* Si seleccionaron existente — asignar directo sin guardar */
-        if(existenteId){
-
-            var nombreBadge = document.getElementById('ext_existente_badge_txt').textContent;
-
-            if(existenteId === 'INTERNO'){
-                /* Interno — asignar por nombre, sin EXT_ */
-                var nombreInterno = document.getElementById('ext_existente_badge').dataset.nombre;
-                var rol = document.getElementById('modal-ext-overlay').dataset.rol || 'asesor';
-
-                if(rol === 'gerente'){
-                    document.getElementById('gerente').value                      = nombreInterno;
-                    document.getElementById('gerente_nombre_display').textContent = nombreInterno;
-                    document.getElementById('gerente_clave_display').textContent  = '';
-                    var btnGer = document.getElementById('btn-add-ger');
-                    if(btnGer) btnGer.remove();
-                } else if(rol === 'sc'){
-                    document.getElementById('sc').value                      = nombreInterno;
-                    document.getElementById('sc_nombre_display').textContent = nombreInterno;
-                    document.getElementById('sc_clave_display').textContent  = '';
-                    var btnSc = document.getElementById('btn-add-sc');
-                    if(btnSc) btnSc.remove();
-                }
-
-                cerrarModalExterno();
-                return;
-            }
-
-            /* Externo existente */
-            var nombre = nombreBadge.split(' (EXT_')[0];
-            asignarExterno(rol, existenteId, nombre);
-            cerrarModalExterno();
-            return;
-        }
-
-        /* Registrar nuevo */
-        var nombre   = document.getElementById('ext_nombre').value.trim();
-        var clabe    = document.getElementById('ext_clabe').value.trim();
-        var id_banco = parseInt(document.getElementById('ext_id_banco').value) || 0;
-
-        if(!nombre){
-            Swal.fire({ icon:'warning', title:'Campo requerido', text:'Ingresa el nombre.', confirmButtonColor:'#1a56db' });
-            return;
-        }
-
-        /* CLABE obligatoria solo para asesor */
-        if(rol === 'asesor' && clabe.length !== 18){
-            Swal.fire({ icon:'warning', title:'CLABE inválida', text:'La CLABE debe tener 18 dígitos.', confirmButtonColor:'#1a56db' });
-            return;
-        }
-
-        var btn = document.querySelector('.btn-ext-guardar');
-        btn.disabled  = true;
-        btn.innerHTML = '<span class="spinner"></span> Guardando...';
-
-        apiPost({
-            action:   'guardarAsesorExterno',
-            nombre:   nombre,
-            clabe:    clabe,
-            id_banco: id_banco,
-            gerencia: '',
-            sc:       ''
-        }).then(function(res){
-            btn.disabled  = false;
-            btn.innerHTML = 'Guardar';
-
-            if(res.status !== 'ok'){
-                Swal.fire({ icon:'error', title:'Error', text:res.msg, confirmButtonColor:'#1a56db' });
-                return;
-            }
-
-            cerrarModalExterno();
-            asignarExterno(rol, res.data.id, res.data.nombre);
-
-            Swal.fire({
-                icon:'success', title:'Registrado',
-                text: res.data.nombre + ' agregado.',
-                timer:1500, showConfirmButton:false
-            });
-
-        }).catch(function(){
-            btn.disabled  = false;
-            btn.innerHTML = 'Guardar';
-            Swal.fire({ icon:'error', title:'Error de conexión', confirmButtonColor:'#1a56db' });
-        });
-    };
-
-    /* ── ASIGNAR EXTERNO SEGÚN ROL ── */
-    function asignarExterno(rol, id, nombre){
-
+    /* ── ASIGNAR EXTERNO/INTERNO YA REGISTRADO SEGÚN ROL ── */
+    function asignarExterno(rol, id, nombre) {
         var clave = 'EXT_' + id;
 
-        if(rol === 'asesor'){
-            seleccionarAsesor({
-                clave:   clave,
-                nombre:  nombre,
-                externo: true,
-                gerencia:'',
-                sc:      '',
-                clabe:   '',
-                banco:   ''
-            });
-
-        } else if(rol === 'gerente'){
+        if (rol === 'asesor') {
+            seleccionarAsesor({ clave: clave, nombre: nombre, externo: true, gerencia:'', sc:'', clabe:'', banco:'' });
+        } else if (rol === 'gerente') {
             document.getElementById('gerente').value                      = clave;
             document.getElementById('gerente_nombre_display').textContent = nombre;
             document.getElementById('gerente_clave_display').textContent  = clave;
-            var btnGer = document.getElementById('btn-add-ger');
-            if(btnGer) btnGer.remove();
-
-        } else if(rol === 'sc'){
+            quitarOResembrarBtnEstructura('gerente');
+        } else if (rol === 'sc') {
             document.getElementById('sc').value                      = clave;
             document.getElementById('sc_nombre_display').textContent = nombre;
             document.getElementById('sc_clave_display').textContent  = clave;
-            var btnSc = document.getElementById('btn-add-sc');
-            if(btnSc) btnSc.remove();
+            quitarOResembrarBtnEstructura('sc');
         }
     }
 
+    function asignarInterno(rol, nombre) {
+        if (rol === 'gerente') {
+            document.getElementById('gerente').value                      = nombre;
+            document.getElementById('gerente_nombre_display').textContent = nombre;
+            document.getElementById('gerente_clave_display').textContent  = '';
+            quitarOResembrarBtnEstructura('gerente');
+        } else if (rol === 'sc') {
+            document.getElementById('sc').value                      = nombre;
+            document.getElementById('sc_nombre_display').textContent = nombre;
+            document.getElementById('sc_clave_display').textContent  = '';
+            quitarOResembrarBtnEstructura('sc');
+        }
+    }
+
+    /* Tras reasignar gerente/sc: en modo edición de folio siempre se
+       vuelve a mostrar "✎ Cambiar" (se puede reasignar cuantas veces
+       haga falta); fuera de ese modo solo se quita el botón "+Agregar". */
+    function quitarOResembrarBtnEstructura(rol) {
+        var btnAdd = document.getElementById('btn-add-' + (rol === 'gerente' ? 'ger' : 'sc'));
+        if (btnAdd) btnAdd.remove();
+        if (folioModoEdicion) {
+            agregarBtnCambiarEstructura(rol);
+        }
+    }
 
     /* ══════════════════════════════════════════════
-    ASESOR EXTERNO
-    ══════════════════════════════════════════════ */
+       ASESOR / GERENTE / SC EXTERNO -- bancos + modal
+       ══════════════════════════════════════════════ */
 
-    var bancosCache  = [];
-    var extBancoId   = 0;
-    var debExtGer    = null;
-    var debExtSc     = null;
+    var bancosCache = [];
+    var extBancoId  = 0;
 
     /* Cargar bancos al init */
-    apiPost({ action: 'getBancos' }).then(function(res){
+    apiPost({ action: 'getBancos' }).then(function (res) {
         if (res.status !== 'ok') return;
         bancosCache = res.data;
         var sel = document.getElementById('ext_id_banco');
-        res.data.forEach(function(b){
+        res.data.forEach(function (b) {
             var opt = document.createElement('option');
-            opt.value       = b.id_banco;
-            opt.textContent = b.banco;
+            opt.value          = b.id_banco;
+            opt.textContent    = b.banco;
             opt.dataset.codigo = b.codigo_banco || '';
             sel.appendChild(opt);
         });
     });
 
-    /* Mostrar btn + cuando el typeahead tiene texto y no hay asesor seleccionado */
-    document.getElementById('asesor_search').addEventListener('input', function(){
-        var btn = document.getElementById('btn-agregar-ext');
-        var tieneTexto = this.value.trim().length >= 2;
-        var tieneSeleccion = document.getElementById('asesor_clave').value !== '';
-        if (tieneTexto && !tieneSeleccion) {
-            btn.classList.add('visible');
-            /* Guardar el texto para pre-llenar el modal */
-            btn.dataset.nombre = this.value.trim();
-        } else {
-            btn.classList.remove('visible');
-        }
-    });
-
-    /* Modificar fetchAsesores para mostrar externos con tag */
-    var _fetchOriginal = fetchAsesores;
-    window.fetchAsesores = function(q) {
-        Promise.all([
-            apiPost({ action: 'buscarAsesor',         q: q }),
-            apiPost({ action: 'buscarAsesorExterno',  q: q })
-        ]).then(function(results){
-            var resInt = results[0];
-            var resExt = results[1];
-
-            dropAsesor.innerHTML = '';
-
-            var todos = [];
-
-            (resInt.data || []).forEach(function(item){
-                todos.push({ clave: item.clave, nombre: item.nombre, externo: false });
-            });
-            (resExt.data || []).forEach(function(item){
-                todos.push({
-                    clave:    'EXT_' + item.id,
-                    nombre:   item.nombre,
-                    externo:  true,
-                    gerencia: item.gerencia,
-                    sc:       item.sc,
-                    clabe:    item.clabe,
-                    banco:    item.banco
-                });
-            });
-
-            todos.sort(function(a,b){ return a.nombre.localeCompare(b.nombre); });
-
-            if (todos.length === 0) {
-                dropAsesor.innerHTML = '<div class="ta-vacio">Sin resultados — usa + para agregar externo</div>';
-                dropAsesor.classList.add('open');
-                return;
-            }
-
-            todos.forEach(function(item){
-                var d = document.createElement('div');
-                d.className = 'ta-item';
-                var tag = item.externo
-                    ? '<span class="badge-ext-tag">Externo</span>'
-                    : '';
-                d.innerHTML = '<span class="ta-nombre">' + resaltar(item.nombre, q) + tag + '</span>'
-                            + '<span class="ta-clave">' + item.clave + '</span>';
-                d.addEventListener('mousedown', function(){
-                    seleccionarAsesor(item);
-                });
-                dropAsesor.appendChild(d);
-            });
-
-            dropAsesor.classList.add('open');
-        });
-    };
-
-    /* Modificar seleccionarAsesor para manejar externos */
-    var _selOriginal = window.seleccionarAsesor;
-    window.seleccionarAsesor = function(item) {
-        inputAsesor.value = item.nombre;
-        document.getElementById('asesor_clave').value = item.clave;
-        document.getElementById('asesor_es_externo').value = item.externo ? '1' : '0';
-        document.getElementById('asesor_badge_txt').textContent = item.nombre + ' (' + item.clave + ')';
-        document.getElementById('asesor_badge_wrap').style.display = 'block';
-        document.getElementById('btn-agregar-ext').classList.remove('visible');
-        dropAsesor.classList.remove('open');
-
-        if (item.externo) {
-            /* Asesor externo: mostrar estructura simplificada sin comisiones de gerente/SC */
-            document.getElementById('loader-estructura').style.display = 'none';
-            document.getElementById('asesor_nombre_display').textContent = item.nombre;
-            document.getElementById('asesor_clave_display').textContent  = item.clave;
-
-            /* Ocultar cards de gerente y SC */
-            document.getElementById('gerente').value                      = item.gerencia || '';
-            document.getElementById('gerente_nombre_display').textContent = item.gerencia || '—';
-            document.getElementById('gerente_clave_display').textContent  = '';
-            document.getElementById('sc').value                           = item.sc || '';
-            document.getElementById('sc_nombre_display').textContent      = item.sc || '—';
-            document.getElementById('sc_clave_display').textContent       = '';
-
-            document.getElementById('sec-estructura-comisiones').style.display = 'block';
-            document.getElementById('breadcrumb-estructura').style.display     = 'none';
-            document.getElementById('nota-sc').style.display                   = 'none';
-
-            /* Deshabilitar inputs de gerente y SC */
-            document.getElementById('porcen_ger').value    = '';
-            document.getElementById('porcen_sc').value     = '';
-            document.getElementById('porcen_ger').disabled = true;
-            document.getElementById('porcen_sc').disabled  = true;
-            document.getElementById('comision_ger').value  = '';
-            document.getElementById('comision_sc').value   = '';
-
-            document.getElementById('porcen_ase').focus();
-
-        } else {
-            /* Asesor interno: flujo normal */
-            document.getElementById('porcen_ger').disabled = false;
-            document.getElementById('porcen_sc').disabled  = false;
-            cargarEstructura(item.clave);
-        }
-    };
-
-    /* Limpiar también rehabilita inputs */
-    var _limpiarOriginal = window.limpiarAsesor;
-    window.limpiarAsesor = function(){
-        _limpiarOriginal();
-        document.getElementById('asesor_es_externo').value    = '0';
-        document.getElementById('btn-agregar-ext').classList.remove('visible');
-        document.getElementById('porcen_ger').disabled = false;
-        document.getElementById('porcen_sc').disabled  = false;
-    };
-
-    /* ── MODAL EXTERNO ── */
-
-    window.abrirModalExterno = function(){
+    window.abrirModalExterno = function () {
         var nombrePre = document.getElementById('btn-agregar-ext').dataset.nombre || '';
         abrirModalExternoBase(nombrePre, 'asesor');
     };
 
-    window.cerrarModalExterno = function(){
+    window.abrirModalExternoParaRol = function (rol, nombre) {
+        abrirModalExternoBase(nombre || '', rol);
+    };
+
+    window.cerrarModalExterno = function () {
         document.getElementById('modal-ext-overlay').classList.remove('open');
         document.getElementById('modal-ext-overlay').dataset.rol = 'asesor';
     };
 
+    function abrirModalExternoBase(nombrePre, rol) {
 
-    /* ── MODAL EXTERNO PARA GERENTE / SC ── */
-    window.abrirModalExternoParaRol = function(rol, nombre){
-        abrirModalExternoBase(nombre || '', rol);
-    };
-
-
-    function abrirModalExternoBase(nombrePre, rol){
-
-        /* Título según rol */
         var titulos = {
             'asesor':  '➕ Agregar asesor externo',
             'gerente': '➕ Agregar gerente externo',
@@ -1268,34 +1277,32 @@ session_start();
         };
         document.querySelector('.modal-ext-header h4').textContent = titulos[rol] || titulos['asesor'];
 
-        /* Guardar rol */
         document.getElementById('modal-ext-overlay').dataset.rol = rol;
 
-        /* Limpiar todo */
-        document.getElementById('ext_nombre').value               = nombrePre;
-        document.getElementById('ext_clabe').value                = '';
-        document.getElementById('ext_id_banco').value             = '';
-        document.getElementById('hint-clabe-ext').textContent     = '';
-        document.getElementById('hint-clabe-ext').className       = '';
-        document.getElementById('banco-detectado-wrap').style.display = 'none';
-        document.getElementById('ext_buscar_existente').value     = '';
-        document.getElementById('ext_existente_badge').style.display = 'none';
-        document.getElementById('ext_existente_id').value         = '';
+        /* CLABE obligatoria solo para asesor (nivel 3) */
+        document.getElementById('ext-clabe-req-hint').textContent =
+            rol === 'asesor' ? '(18 dígitos, obligatoria)' : '(18 dígitos, opcional)';
+
+        document.getElementById('ext_nombre').value                    = nombrePre;
+        document.getElementById('ext_clabe').value                     = '';
+        document.getElementById('ext_id_banco').value                  = '';
+        document.getElementById('hint-clabe-ext').textContent          = '';
+        document.getElementById('hint-clabe-ext').className            = '';
+        document.getElementById('banco-detectado-wrap').style.display  = 'none';
+        document.getElementById('ext_buscar_existente').value          = '';
+        document.getElementById('ext_existente_badge').style.display   = 'none';
+        document.getElementById('ext_existente_id').value              = '';
         extBancoId = 0;
 
         document.getElementById('modal-ext-overlay').classList.add('open');
-        setTimeout(function(){ document.getElementById('ext_buscar_existente').focus(); }, 100);
+        setTimeout(function () { document.getElementById('ext_buscar_existente').focus(); }, 100);
     }
 
-
-    /* Cerrar con ESC / click overlay */
-    document.getElementById('modal-ext-overlay').addEventListener('click', function(e){
+    document.getElementById('modal-ext-overlay').addEventListener('click', function (e) {
         if (e.target === this) cerrarModalExterno();
     });
 
-    /* ── CLABE input ── */
-    window.onClabeInput = function(inp){
-        /* Solo números */
+    window.onClabeInput = function (inp) {
         inp.value = inp.value.replace(/\D/g, '').substring(0, 18);
 
         var hint = document.getElementById('hint-clabe-ext');
@@ -1318,12 +1325,10 @@ session_start();
         hint.textContent = '✓ 18 dígitos';
         hint.className = 'ok';
 
-        /* Detectar banco por dígitos 4-6 */
         var codigo = inp.value.substring(0, 3);
+        var banco  = bancosCache.find(function (b) { return b.codigo_banco === codigo; });
 
-        var banco  = bancosCache.find(function(b){ return b.codigo_banco === codigo; });
-
-        var wrap   = document.getElementById('banco-detectado-wrap');
+        var wrap     = document.getElementById('banco-detectado-wrap');
         var selBanco = document.getElementById('ext_id_banco');
 
         if (banco) {
@@ -1341,99 +1346,51 @@ session_start();
         }
     };
 
-    window.onBancoManualChange = function(){
-        var sel = document.getElementById('ext_id_banco');
-        extBancoId = parseInt(sel.value) || 0;
+    window.onBancoManualChange = function () {
+        extBancoId = parseInt(document.getElementById('ext_id_banco').value) || 0;
     };
 
-    /* ── TYPEAHEAD GERENCIA ── */
-    window.onExtGerenciaInput = function(inp){
-        clearTimeout(debExtGer);
-        var q = inp.value.trim();
-        var drop = document.getElementById('ext_gerencia_dropdown');
-        document.getElementById('ext_gerencia').value = q; /* guardar valor libre también */
-        if (q.length < 2) { drop.classList.remove('open'); return; }
-        debExtGer = setTimeout(function(){
-            apiPost({ action: 'buscarGerencia', q: q }).then(function(res){
-                drop.innerHTML = '';
-                if (!res.data || res.data.length === 0) {
-                    drop.innerHTML = '<div class="ta-vacio">Sin resultados</div>';
-                    drop.classList.add('open'); return;
-                }
-                res.data.forEach(function(val){
-                    var d = document.createElement('div');
-                    d.className = 'ta-item';
-                    d.innerHTML = '<span class="ta-nombre">' + resaltar(val, q) + '</span>';
-                    d.addEventListener('mousedown', function(){
-                        document.getElementById('ext_gerencia_search').value = val;
-                        document.getElementById('ext_gerencia').value        = val;
-                        drop.classList.remove('open');
-                    });
-                    drop.appendChild(d);
-                });
-                drop.classList.add('open');
-            });
-        }, 300);
-    };
+    /* ── GUARDAR (existente seleccionado o nuevo registro) ── */
+    window.guardarAsesorExterno = function () {
 
-    document.getElementById('ext_gerencia_search').addEventListener('blur', function(){
-        setTimeout(function(){ document.getElementById('ext_gerencia_dropdown').classList.remove('open'); }, 200);
-    });
+        var rol         = document.getElementById('modal-ext-overlay').dataset.rol || 'asesor';
+        var existenteId = document.getElementById('ext_existente_id').value.trim();
 
-    /* ── TYPEAHEAD SC ── */
-    window.onExtScInput = function(inp){
-        clearTimeout(debExtSc);
-        var q = inp.value.trim();
-        var drop = document.getElementById('ext_sc_dropdown');
-        document.getElementById('ext_sc').value = q;
-        if (q.length < 2) { drop.classList.remove('open'); return; }
-        debExtSc = setTimeout(function(){
-            apiPost({ action: 'buscarSC', q: q }).then(function(res){
-                drop.innerHTML = '';
-                if (!res.data || res.data.length === 0) {
-                    drop.innerHTML = '<div class="ta-vacio">Sin resultados</div>';
-                    drop.classList.add('open'); return;
-                }
-                res.data.forEach(function(val){
-                    var d = document.createElement('div');
-                    d.className = 'ta-item';
-                    d.innerHTML = '<span class="ta-nombre">' + resaltar(val, q) + '</span>';
-                    d.addEventListener('mousedown', function(){
-                        document.getElementById('ext_sc_search').value = val;
-                        document.getElementById('ext_sc').value        = val;
-                        drop.classList.remove('open');
-                    });
-                    drop.appendChild(d);
-                });
-                drop.classList.add('open');
-            });
-        }, 300);
-    };
+        /* Ya seleccionaron alguien existente -- asignar directo, sin insertar */
+        if (existenteId) {
 
-    document.getElementById('ext_sc_search').addEventListener('blur', function(){
-        setTimeout(function(){ document.getElementById('ext_sc_dropdown').classList.remove('open'); }, 200);
-    });
+            if (existenteId === 'INTERNO') {
+                var nombreInterno = document.getElementById('ext_existente_badge').dataset.nombre;
+                asignarInterno(rol, nombreInterno);
+                cerrarModalExterno();
+                return;
+            }
 
-    /* ── GUARDAR ASESOR EXTERNO ── */
-    window.guardarAsesorExterno = function(){
+            var nombreBadge = document.getElementById('ext_existente_badge_txt').textContent;
+            var nombre      = nombreBadge.split(' (EXT_')[0];
+            asignarExterno(rol, existenteId, nombre);
+            cerrarModalExterno();
+            return;
+        }
 
+        /* Registrar nuevo externo */
         var nombre   = document.getElementById('ext_nombre').value.trim();
         var clabe    = document.getElementById('ext_clabe').value.trim();
         var id_banco = parseInt(document.getElementById('ext_id_banco').value) || 0;
-        var gerencia = document.getElementById('ext_gerencia').value.trim();
-        var sc       = document.getElementById('ext_sc').value.trim();
 
         if (!nombre) {
-            Swal.fire({ icon:'warning', title:'Campo requerido', text:'Ingresa el nombre del asesor.', confirmButtonColor:'#1a56db' });
+            Swal.fire({ icon:'warning', title:'Campo requerido', text:'Ingresa el nombre.', confirmButtonColor:'#1a56db' });
             return;
         }
-        if (clabe.length !== 18) {
+
+        /* CLABE obligatoria solo para asesor (nivel 3) */
+        if (rol === 'asesor' && clabe.length !== 18) {
             Swal.fire({ icon:'warning', title:'CLABE inválida', text:'La CLABE debe tener 18 dígitos.', confirmButtonColor:'#1a56db' });
             return;
         }
 
         var btn = document.querySelector('.btn-ext-guardar');
-        btn.disabled = true;
+        btn.disabled  = true;
         btn.innerHTML = '<span class="spinner"></span> Guardando...';
 
         apiPost({
@@ -1441,11 +1398,12 @@ session_start();
             nombre:   nombre,
             clabe:    clabe,
             id_banco: id_banco,
-            gerencia: gerencia,
-            sc:       sc
-        }).then(function(res){
-            btn.disabled = false;
-            btn.innerHTML = 'Guardar asesor';
+            gerencia: '',
+            sc:       '',
+            rol:      rol
+        }).then(function (res) {
+            btn.disabled  = false;
+            btn.innerHTML = 'Guardar';
 
             if (res.status !== 'ok') {
                 Swal.fire({ icon:'error', title:'Error', text: res.msg, confirmButtonColor:'#1a56db' });
@@ -1453,57 +1411,7 @@ session_start();
             }
 
             cerrarModalExterno();
-
-            var rol = document.getElementById('modal-ext-overlay').dataset.rol || 'asesor';
-
-            if (!nombre) {
-                Swal.fire({ icon:'warning', title:'Campo requerido', text:'Ingresa el nombre.', confirmButtonColor:'#1a56db' });
-                return;
-            }
-
-            /* CLABE obligatoria solo para asesor, opcional para gerente/SC */
-            if (rol === 'asesor' && clabe.length !== 18) {
-                Swal.fire({ icon:'warning', title:'CLABE inválida', text:'La CLABE debe tener 18 dígitos.', confirmButtonColor:'#1a56db' });
-                return;
-            }
-
-            if (rol === 'gerente') {
-
-                /* Actualizar card gerente */
-                document.getElementById('gerente').value                      = 'EXT_' + res.data.id;
-                document.getElementById('gerente_nombre_display').textContent = res.data.nombre;
-                document.getElementById('gerente_clave_display').textContent  = 'EXT_' + res.data.id;
-
-                var btnGer = document.getElementById('btn-add-ger');
-                if (btnGer) btnGer.remove();
-
-            } else if (rol === 'sc') {
-
-                /* Actualizar card SC */
-                document.getElementById('sc').value                      = 'EXT_' + res.data.id;
-                document.getElementById('sc_nombre_display').textContent = res.data.nombre;
-                document.getElementById('sc_clave_display').textContent  = 'EXT_' + res.data.id;
-
-                var btnSc = document.getElementById('btn-add-sc');
-                if (btnSc) btnSc.remove();
-
-            } else {
-
-                /* Asesor nuevo — seleccionar automáticamente */
-                seleccionarAsesor({
-                    clave:    'EXT_' + res.data.id,
-                    nombre:   res.data.nombre,
-                    externo:  true,
-                    gerencia: res.data.gerencia,
-                    sc:       res.data.sc,
-                    clabe:    res.data.clabe,
-                    banco:    res.data.banco
-                });
-
-            }
-
-            /* Resetear rol */
-            document.getElementById('modal-ext-overlay').dataset.rol = 'asesor';
+            asignarExterno(rol, res.data.id, res.data.nombre);
 
             Swal.fire({
                 icon:'success', title:'Registrado',
@@ -1511,9 +1419,9 @@ session_start();
                 timer:1500, showConfirmButton:false
             });
 
-        }).catch(function(){
-            btn.disabled = false;
-            btn.innerHTML = 'Guardar asesor';
+        }).catch(function () {
+            btn.disabled  = false;
+            btn.innerHTML = 'Guardar';
             Swal.fire({ icon:'error', title:'Error de conexión', confirmButtonColor:'#1a56db' });
         });
     };

@@ -995,7 +995,7 @@
 														mensaje("Consultas tempralmente fuera de servicio por proceso de pagos","seg_ventas.php");
 													if($nivel==12 or $nivel==6)
 													{
-														$qestruc="carobra_2014.estruc_empleados";
+														$qestruc="Select * from carobra_2014.estruc_empleados";
 													}
 												}
 											}
@@ -1126,66 +1126,27 @@
 									if($qestruc=="")
 									{
 										$query="Insert into carobra_2014.$qsv
-											Select p.folio,'','','','','',id_estatus_prod,
-												   id_estatus_prod,estatus_confirma,cierre_cap,0,
-												   0,id_tipo_mov,p.nss,'',nap,'','',afo_cedente,'',
-												   '','',sc,brocker,id_gerencia,gerencia,
-												   id_usuario_cap,'','',p.no_empleado,'','',
-												   id_estatus_anticipo,monto_anticipo,0,
-												   saldo_estimado,0,0,'',fec_captura,fec_pago_ant,
-												   '',fec_traspaso,fec_cierre,'','',
-												   fec_ult_estatus,'','','',0,''
-									 		FROM (Select * from $t_prod 
-									 			  where folio='$valor1' and no_empleado > 0) p 
-									 			inner join carobra_2014.estruc_empleados ee 
-									 				on (p.no_empleado=ee.no_empleado)
-									 		union all
-											Select p.folio,'','','','','',id_estatus_prod,
-												   id_estatus_prod,estatus_confirma,cierre_cap,0,
-												   0,id_tipo_mov,p.nss,'',p.nap,'','',afo_cedente,
-												   '','','',sc,brocker,id_gerencia,gerencia,
-												   id_usuario_cap,'','',p.no_empleado,'','',
-												   id_estatus_anticipo,monto_anticipo,0,
-												   saldo_estimado,0,0,'',fec_captura,fec_pago_ant,
-												   '',fec_traspaso,fec_cierre,'','',
-												   fec_ult_estatus,'','','',0,''
-									 		FROM (Select * from $t_prod 
-									 			  where folio='$valor1' and no_empleado = 0) p 
-									 			inner join carobra_2014.naps n on (p.nap=n.nap)
-									 			inner join carobra_2014.estruc_empleados ee 
-									 				on (n.no_empleado=ee.no_empleado)
-									 		union all
-											Select p.folio,'','','','','',id_estatus_prod,
-												   id_estatus_prod,estatus_confirma,cierre_cap,0,
-												   0,id_tipo_mov,p.nss,'',nap,'','',afo_cedente,'',
-												   '','',sc,brocker,id_gerencia,gerencia,
-												   id_usuario_cap,'','',p.no_empleado,'','',
-												   id_estatus_anticipo,monto_anticipo,0,
-												   saldo_estimado,0,0,'',fec_captura,fec_pago_ant,
-												   '',fec_traspaso,fec_cierre,'','',
-												   fec_ult_estatus,'','','',0,''
-									 		FROM (Select * from $t_prod 
-									 			  where folio='$valor1' and no_empleado = 0) p 
-									 			inner join carobra.empleados e on (p.nap=e.nae)
-									 			inner join carobra_2014.estruc_empleados ee 
-									 				on (e.no_empleado=ee.no_empleado)";
+												Select p.folio,'','','','','',id_estatus_prod,id_estatus_prod,estatus_confirma,cierre_cap,0,0,id_tipo_mov,
+													   p.nss,'',p.nap,'','',afo_cedente,'','','',sc,brocker,id_gerencia,gerencia,id_usuario_cap,'',
+													   fc.campana,p.no_empleado,'','',id_estatus_anticipo,monto_anticipo,0,saldo_estimado,0,0,
+													   if(f.mes <=12,m.mes_largo,f.nom_periodo) as nom_mes,fec_captura,fec_pago_ant,'',fec_traspaso,
+													   fec_cierre,'','',fec_ult_estatus,'','','',0,'' 
+										  		from $t_prod p
+										  		 	join carobra_2014.naps n on (p.nap=n.nap)
+						 							join carobra_2014.estruc_empleados ee 
+						 								on (if(p.no_empleado=0,n.no_empleado,p.no_empleado)=ee.no_empleado)
+						 							join fec_cierre_campana fc 
+						 								on (str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date(fc.fec_ini,'%d/%m/%Y')
+															and str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date(fc.fec_fin,'%d/%m/%Y'))
+													JOIN fechas_cierre_com f
+														on (str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date(f.fec_ini,'%d/%m/%Y')
+																and str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date(f.fec_fin,'%d/%m/%Y'))
+													JOIN meses m on (f.mes=m.no_mes)
+						 			  			where folio='$valor1'";
 //echo $query . "<br><br>";
 								}
 								else
 								{
-									$query="Insert into carobra_2014.$qsv
-											Select p.folio,'','','','','',id_estatus_prod,
-												   id_estatus_prod,estatus_confirma,cierre_cap,0,
-												   0,id_tipo_mov,nss,'',nap,'','',afo_cedente,'','',
-												   '',sc,brocker,id_gerencia,gerencia,
-												   id_usuario_cap,'','',p.no_empleado,'','',
-												   id_estatus_anticipo,monto_anticipo,0,
-												   saldo_estimado,0,0,'',fec_captura,fec_pago_ant,
-												   '',fec_traspaso,fec_cierre,'','',
-												   fec_ult_estatus,'','','',0,''
-									 		FROM carobra_2014.produccion p
-												inner join $qestruc ee 
-														on (p.no_empleado=ee.no_empleado)";
 									$w_query=" where p.fec_traspaso REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}$' 
 													AND str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date('$fec_inc','%d/%m/%Y')
 													AND str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date('$fec_fin','%d/%m/%Y')
@@ -1194,15 +1155,55 @@
 										$w_query.=" and length(p.folio) < 10 ";
 									else
 										$w_query.=" and length(p.folio) >= 10 ";
+
+									if($srm0==0 and $q_emp==1)
+										$qcruce="if(p.no_empleado=0,n.no_empleado,p.no_empleado)=ee.no_empleado";
+									else
+										$qcruce="p.no_empleado=ee.no_empleado";
+
+ 									$tt_prod="w_sv_prod_" . $clave . "_" . $n_aleatorio;
+
+
+									$sql="Create TABLE $tt_prod as
+											Select p.*,STR_TO_DATE(fec_traspaso, '%d/%m/%Y') as fec_traspaso_date 
+											FROM carobra_2014.produccion p $w_query";
+									$conecta->consulta($sql);
+
+								    $sql="Alter TABLE $tt_prod
+								              ADD INDEX idx_nap (nap),
+								              ADD INDEX idx_no_empleado (no_empleado),
+								              ADD INDEX idx_fec_traspaso (fec_traspaso_date)";
+								    $conecta->consulta($sql);
+
+
+									$query="Insert into carobra_2014.$qsv
+											with
+												estruc as ($qestruc),
+												fec_cierre as (Select campana,STR_TO_DATE(fec_ini, '%d/%m/%Y') as fec_ini,
+																	  STR_TO_DATE(fec_fin, '%d/%m/%Y') as fec_fin
+															   from fec_cierre_campana),
+												meses as (Select if(fc.mes <=12,m.mes_largo,fc.nom_periodo) as nom_mes,
+																 STR_TO_DATE(fec_ini, '%d/%m/%Y') as fec_ini,STR_TO_DATE(fec_fin, '%d/%m/%Y') as fec_fin 
+														  from fechas_cierre_com fc
+														  	left join meses m on (fc.mes=m.no_mes))
+											Select p.folio,'','','','','',id_estatus_prod,id_estatus_prod,estatus_confirma,cierre_cap,0,0,id_tipo_mov,nss,
+												   '',p.nap,'','',afo_cedente,'','','',sc,brocker,ee.id_gerencia,gerencia,id_usuario_cap,'',fc.campana,
+												   p.no_empleado,'','',id_estatus_anticipo,monto_anticipo,0,saldo_estimado,0,0,nom_mes,fec_captura,
+												   fec_pago_ant,'',p.fec_traspaso,fec_cierre,'','',fec_ult_estatus,'','','',0,''
+											from $tt_prod p
+												join carobra_2014.naps n on (p.nap=n.nap)
+												join estruc ee on ($qcruce)
+												join fec_cierre fc 
+						 								on (fec_traspaso_date BETWEEN fc.fec_ini and fc.fec_fin)
+												join meses m on (fec_traspaso_date BETWEEN m.fec_ini and m.fec_fin)";
+									$w_query="";
 									if($sfp==1)
 									{
-										$query.=" left join carobra_2014.calculo_pago cp 
-														on (p.folio=cp.folio) ";
-										$w_query.=" and ifnull(cp.fec_pago,'')=''";
+										$query.=" left join carobra_2014.calculo_pago cp on (p.folio=cp.folio) ";
+										$w_query=" where ifnull(cp.fec_pago,'')=''";
 										if($srm0==1)
 										{
-											$query.=" left join carobra_2014.pagos pa 
-															on (p.folio=pa.folio) ";
+											$query.=" left join carobra_2014.pagos pa on (p.folio=pa.folio) ";
 											$w_query.=" and ifnull(pa.saldo_real,0)!=0";
 										}
 									}
@@ -1210,62 +1211,12 @@
 									{
 										if($srm0==1)
 										{
-											$query.=" left join carobra_2014.pagos pa 
-															on (p.folio=pa.folio) ";
-											$w_query.=" and ifnull(pa.saldo_real,0)!=0";
+											$query.=" left join carobra_2014.pagos pa on (p.folio=pa.folio) ";
+											$w_query.=" where ifnull(pa.saldo_real,0)!=0";
 										}
 									}
 									$query.=$w_query;
-									if($srm0==0 and $q_emp==1)
-									{
-										$query.=" union all
-												  Select p.folio,'','','','','',id_estatus_prod,
-												  		 id_estatus_prod,estatus_confirma,
-												  		 cierre_cap,0,0,id_tipo_mov,p.nss,'',p.nap,
-												  		 '','',afo_cedente,'','','',sc,brocker,
-												  		 id_gerencia,gerencia,id_usuario_cap,'','',
-												  		 p.no_empleado,'','',id_estatus_anticipo,
-												  		 monto_anticipo,0,saldo_estimado,0,0,'',
-												  		 fec_captura,fec_pago_ant,'',fec_traspaso,
-												  		 fec_cierre,'','',fec_ult_estatus,'','','',0,''
-												  FROM carobra_2014.produccion p
-												  	inner join carobra_2014.naps n on (p.nap=n.nap)
-												  	inner join $qestruc ee 
-												  			on (n.no_empleado=ee.no_empleado)"; 
-										$w_query=" where p.no_empleado=0 and p.fec_traspaso REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}$' 
-														AND str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date('$fec_inc','%d/%m/%Y')
-														AND str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date('$fec_fin','%d/%m/%Y')
-														$w_nap";
-										if($reg_esp==1)
-											$w_query.=" and length(p.folio) < 10 ";
-										else
-											$w_query.=" and length(p.folio) >= 10 ";
-										$query.=$w_query;
 
-										$query.=" union all
-												  Select p.folio,'','','','','',id_estatus_prod,
-												  		 id_estatus_prod,estatus_confirma,
-												  		 cierre_cap,0,0,id_tipo_mov,p.nss,'',p.nap,
-												  		 '','',afo_cedente,'','','',sc,brocker,
-												  		 id_gerencia,gerencia,id_usuario_cap,'','',
-												  		 p.no_empleado,'','',id_estatus_anticipo,
-												  		 monto_anticipo,0,saldo_estimado,0,0,'',
-												  		 fec_captura,fec_pago_ant,'',fec_traspaso,
-												  		 fec_cierre,'','',fec_ult_estatus,'','','',0,''
-												  FROM carobra_2014.produccion p
-												  	inner join carobra.empleados e on (p.nap=e.nae)
-												  	inner join $qestruc ee 
-												  			on (e.no_empleado=ee.no_empleado)"; 
-										$w_query=" where p.no_empleado=0 and p.fec_traspaso REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}$' 
-														AND str_to_date(p.fec_traspaso,'%d/%m/%Y') >= str_to_date('$fec_inc','%d/%m/%Y')
-														AND str_to_date(p.fec_traspaso,'%d/%m/%Y') <= str_to_date('$fec_fin','%d/%m/%Y')
-														$w_nap";
-										if($reg_esp==1)
-											$w_query.=" and length(p.folio) < 10 ";
-										else
-											$w_query.=" and length(p.folio) >= 10 ";
-										$query.=$w_query;
-									}
 									$t_pt="prod_trabajador";
 									$t_cp="calculo_pago";
 									
@@ -1275,19 +1226,27 @@
 									{
 										$t_ap="carobra.acum_det_prod_" . $anio_ini;
 											$t_ap2="carobra.acum_det_prod_" . $anio_fin;
-										}
 									}
-									}
+								}
+							}
+//echo $query;
 									$conecta->consulta($query);
+
+									$conecta->consulta("Drop TABLE IF EXISTS $tt_prod");
+
 								$bd=$conecta->consulta("Select 1 from carobra_2014.$qsv");
 								if ($bd->num_rows != 0)
 								{
 									$m_query="";
 //echo $query;
+
 									//$bd=$conecta->consulta("Select * from $qsv");
 									//if ($bd->num_rows != 0)
 									//{
 									//	$conecta->consulta("Delete from $qsv");
+
+
+/*									
 									$query="Update $qsv s
 												JOIN fechas_cierre_com f
 														on (str_to_date(s.fec_traspaso,'%d/%m/%Y') >= str_to_date(f.fec_ini,'%d/%m/%Y')
@@ -1300,6 +1259,7 @@
 											set s.campana=f.campana
 											where str_to_date(s.fec_traspaso,'%d/%m/%Y') >= str_to_date(f.fec_ini,'%d/%m/%Y')
 												and str_to_date(s.fec_traspaso,'%d/%m/%Y') <= str_to_date(f.fec_fin,'%d/%m/%Y')";
+*/
 									$m_query.=";" . $query;
 
 									$query="Update $qsv s, $t_pt pt

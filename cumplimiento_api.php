@@ -5,6 +5,17 @@ ini_set('display_startup_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
+/* getDetalle (precache de "Detalle" para el export) trae TODOS los
+   folios del periodo de un jalón -- miles de filas con varios JOIN.
+   Con los límites por default de PHP (max_execution_time ~30s,
+   memory_limit ~128M) el script se puede morir a medio fetch/encode
+   en un query así de grande, y eso es lo que en realidad estaba
+   cortando "Detalle" a la mitad -- no falta de espera antes de
+   consultar. Se les quita el límite para esta petición. */
+set_time_limit(0);
+ini_set('max_execution_time', 0);
+ini_set('memory_limit', '1024M');
+
 session_start();
 
 header('Content-Type: application/json');
@@ -20,7 +31,7 @@ $input = is_array($input) ? $input : [];
 $action = $input['action'] ?? '';
 
 if($action === 'getCumplimiento'){
-    
+
     $periodo  = mysqli_real_escape_string($conecta->conexion, $input['periodo'] ?? '');
     $anio     = mysqli_real_escape_string($conecta->conexion, $input['anio'] ?? '');
     $nameNap  = mysqli_real_escape_string($conecta->conexion, $input['nap'] ?? '');
@@ -41,11 +52,11 @@ if($action === 'getCumplimiento'){
             exit;
         }
     }
-    
+
     // =========================
     // VALIDAR FILTROS
     // =========================
- 
+
     if(empty($periodo) || empty($anio))
     {
         echo json_encode([
@@ -86,14 +97,25 @@ if($action === 'getCumplimiento'){
 
     $whereSQL = implode(" AND ", $where);
 
+    /* ── Bono (esquema_bonos) ──────────────────────────────────────────
+       REGLA: el escalón del bono lo marca el MAYOR entre AVS y Registros
+       (GREATEST(avs, registros)). Se toma el renglón de esquema_bonos
+       más alto cuyo eb.avs sea <= a ese número.
+         ej. PLATA, AVS 0 y 2 registros -> escalón 2 -> 6,500
+       ANTES el join era (eb.avs <= t.avs OR eb.registros <= t.registros):
+       como en esquema_bonos eb.registros = 1 en todos los escalones, cualquier
+       NAP con >= 1 registro cumplía los 3 escalones y el MAX le pagaba el
+       más alto (7,000) sin importar sus AVS. La columna eb.registros ya no
+       interviene en el cálculo. Para calificar sigue haciendo falta
+       avs >= 1 o registros >= 1. */
     $sql ="Select c.*,ifnull(er.regimen,'') as regimen, ifnull(er.cp_fiscal,'') as cp_fiscal, bono * ifnull(iva,0) as iva,
-                  bono * ifnull(ret_iva,0) as ret_iva, 
+                  bono * ifnull(ret_iva,0) as ret_iva,
                   case er.regimen when 'Asimilados a Salarios' then if(bono=0,0,(((bono - limite_inferior) * tasa) + cuota_fija) * -1)
-                                  else bono * ifnull(ret_isr,0) 
+                                  else bono * ifnull(ret_isr,0)
                    end as ret_isr,
-                   bono + bono * ifnull(iva,0) + bono * ifnull(ret_iva,0) + case er.regimen when 'Asimilados a Salarios' 
+                   bono + bono * ifnull(iva,0) + bono * ifnull(ret_iva,0) + case er.regimen when 'Asimilados a Salarios'
                                                                                 then if(bono=0,0,(((bono - limite_inferior) * tasa) + cuota_fija) * -1)
-                                                                                else bono * ifnull(ret_isr,0) 
+                                                                                else bono * ifnull(ret_isr,0)
                                                                             end as total
             from (Select t.sc,t.brocker,t.gerencia,t.nap,u.clave,u.nombre,rfc,t.avs,t.registros,t.pago,t.saldo_total,t.puntos,ec.categoria,
                                MAX(IF(t.avs >= 1 OR t.registros >= 1,IFNULL(eb.bono,0),0)) AS bono
@@ -104,10 +126,10 @@ if($action === 'getCumplimiento'){
                                 LEFT JOIN estruc_empleados ee ON (n.no_empleado = ee.no_empleado)
                               WHERE $whereSQL and c.pago=1
                               GROUP BY c.nap,c.avs,c.registros,c.pago,ee.sc,ee.brocker,ee.gerencia,n.no_empleado) t
-                            LEFT JOIN esquema_categorias ec 
+                            LEFT JOIN esquema_categorias ec
                                     ON (t.puntos >= ec.puntos_min AND (t.puntos <= ec.puntos_max OR ec.puntos_max IS NULL))
                             LEFT JOIN esquema_bonos eb
-                                ON (ec.categoria = eb.categoria AND (eb.avs <= t.avs OR eb.registros <= t.registros))
+                                ON (ec.categoria = eb.categoria AND eb.avs <= GREATEST(t.avs, t.registros))
                             LEFT JOIN empleados e ON (t.no_empleado = e.no_empleado)
                             LEFT JOIN usuarios u ON e.clave = u.clave
                         GROUP BY t.sc,t.brocker,t.gerencia,t.nap,u.clave,u.nombre,rfc,t.avs,t.registros,t.pago,t.saldo_total,t.puntos,ec.categoria) c
@@ -126,7 +148,7 @@ if($action === 'getCumplimiento'){
                            FROM empl_reg_fiscal
                            GROUP BY clave) er on (c.clave=er.clave)
                 left join regimen_fiscal rf on (er.regimen=rf.regimen)
-                left join isr_tarifa_asimilados ita 
+                left join isr_tarifa_asimilados ita
                         on (ita.anio='$anio' and er.regimen='Asimilados a Salarios' and c.bono >= limite_inferior and c.bono <= limite_superior)";
     $res = $conecta->consulta($sql);
 
@@ -145,8 +167,9 @@ if($action === 'getCumplimiento'){
     }
 
     echo json_encode([
-        'status' => 'ok',
-        'data'   => $data
+        'status'     => 'ok',
+        'regla_bono' => 'GREATEST(avs,registros)',   /* marca de versión: si no aparece en la respuesta, el servidor tiene el archivo viejo */
+        'data'       => $data
     ]);
 
     exit;
@@ -155,18 +178,52 @@ if($action === 'getCumplimiento'){
 
 if($action === 'getDetalle'){
 
+    /* nap es OPCIONAL: si viene vacío se trae el detalle de TODOS los
+       NAPs del periodo/año de un solo jalón (usado por el precache que
+       arma la hoja "Detalle" del export). Antes el frontend disparaba
+       una petición POR CADA NAP en paralelo (hasta 300+ al mismo
+       tiempo) -- con esa carga algunas fallaban en silencio (timeout /
+       límite de conexiones/sesión) y el NAP completo desaparecía de
+       "Detalle" aunque sí seguía apareciendo en "Bonos por NAP" (esa
+       hoja se arma con una sola consulta aparte, sin depender de estas
+       peticiones). Traer todo en una sola consulta elimina esa carrera. */
     $nap     = mysqli_real_escape_string($conecta->conexion, $input['nap']     ?? '');
     $anio    = mysqli_real_escape_string($conecta->conexion, $input['anio']    ?? '');
     $periodo = mysqli_real_escape_string($conecta->conexion, $input['periodo'] ?? '');
 
-    $sql = "Select sc,brocker,gerencia,c.*, pt.trabajador,if(p.no_empleado=0,'Sin captura','') as estatus_cap
-            FROM cumplimiento c 
-                inner join produccion p on (c.folio=p.folio)
+    if(empty($anio) || empty($periodo)){
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Debes indicar año y periodo'
+        ]);
+        exit;
+    }
+
+    /* c.pago=1 -- MISMO filtro que usa getCumplimiento para armar "Bonos
+       por NAP" (esa hoja solo suma folios con pago=1). Sin este filtro,
+       "Detalle" traía TAMBIÉN los folios no pagados/pendientes del
+       periodo, sumando de más y desfasando el total contra "Bonos por
+       NAP". */
+    $whereDet = ["c.anio = '$anio'", "c.periodo = '$periodo'", "c.pago = 1"];
+    if(!empty($nap)){
+        $whereDet[] = "c.nap = '$nap'";
+    }
+    $whereDetSQL = implode(" AND ", $whereDet);
+
+    /* OJO: antes era INNER JOIN produccion -- si un folio de cumplimiento
+       no tenía (todavía, o ya no) su fila espejo en produccion, la fila
+       completa desaparecía de "Detalle" sin dejar rastro, aunque su
+       saldo sí contaba en el total de "Bonos por NAP" (esa consulta no
+       pasa por produccion). Con LEFT JOIN la fila siempre aparece; si de
+       plano no hay captura en produccion se marca "Sin captura" igual
+       que cuando el empleado capturado es 0. */
+    $sql = "Select sc,brocker,gerencia,c.*, pt.trabajador,
+                   if(p.no_empleado is null or p.no_empleado=0,'Sin captura','') as estatus_cap
+            FROM cumplimiento c
+                left join produccion p on (c.folio=p.folio)
                 left join estruc_empleados ee on (p.no_empleado=ee.no_empleado)
             LEFT JOIN prod_trabajador pt ON c.folio = pt.folio
-            WHERE c.nap     = '$nap'
-              AND c.anio    = '$anio'
-              AND c.periodo = '$periodo'";
+            WHERE $whereDetSQL";
     $res = $conecta->consulta($sql);
 
     if(!$res){
@@ -192,6 +249,134 @@ if($action === 'getDetalle'){
     exit;
 }
 
+if($action === 'getDetalleConteo'){
+
+    /* Cuenta rápido (sin traer columnas) con el MISMO FROM/JOIN/WHERE
+       que getDetalle. El frontend usa esto como "verdad de referencia":
+       compara el número de filas que le llegaron de getDetalle contra
+       este COUNT(*) real, y solo da por completa la carga cuando
+       coinciden -- así ya no depende de que dos lecturas de getDetalle
+       se repitan entre sí (eso se demostró que puede dar un falso
+       positivo si el proceso que llena cumplimiento hace una pausa
+       justo a la mitad). */
+    $nap     = mysqli_real_escape_string($conecta->conexion, $input['nap']     ?? '');
+    $anio    = mysqli_real_escape_string($conecta->conexion, $input['anio']    ?? '');
+    $periodo = mysqli_real_escape_string($conecta->conexion, $input['periodo'] ?? '');
+
+    if(empty($anio) || empty($periodo)){
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Debes indicar año y periodo'
+        ]);
+        exit;
+    }
+
+    $whereDet = ["c.anio = '$anio'", "c.periodo = '$periodo'", "c.pago = 1"];
+    if(!empty($nap)){
+        $whereDet[] = "c.nap = '$nap'";
+    }
+    $whereDetSQL = implode(" AND ", $whereDet);
+
+    $sql = "SELECT COUNT(*) AS total
+            FROM cumplimiento c
+                left join produccion p on (c.folio=p.folio)
+                left join estruc_empleados ee on (p.no_empleado=ee.no_empleado)
+            LEFT JOIN prod_trabajador pt ON c.folio = pt.folio
+            WHERE $whereDetSQL";
+    $res = $conecta->consulta($sql);
+
+    if(!$res){
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Error al contar detalle: ' . mysqli_error($conecta->conexion)
+        ]);
+        exit;
+    }
+
+    $row = mysqli_fetch_assoc($res);
+
+    echo json_encode([
+        'status' => 'ok',
+        'total'  => (int)($row['total'] ?? 0)
+    ]);
+
+    exit;
+}
+
+/* ══════════ DEBUG del bono ══════════
+   Muestra, para un NAP/año/periodo, cómo se llega al bono del "Esquema de comisiones":
+     1) los datos base del NAP (AVS, registros, saldo, puntos),
+     2) qué categorías de esquema_categorias cubren esos puntos (si hay más de una, hay traslape),
+     3) TODOS los renglones de esquema_bonos de esas categorías y, por cada uno, si cumple
+        la regla VIEJA (avs<=avs OR registros<=registros) y la NUEVA (avs <= GREATEST(avs,registros)),
+     4) el bono que resulta con cada regla (MAX de los que cumplen).
+   'regla_en_uso' dice cuál tiene el getCumplimiento que está desplegado. */
+if($action === 'debugBono'){
+
+    $nap     = preg_replace('/\D/', '', (string)($input['nap'] ?? ''));
+    $anio    = mysqli_real_escape_string($conecta->conexion, $input['anio']    ?? '');
+    $periodo = mysqli_real_escape_string($conecta->conexion, $input['periodo'] ?? '');
+
+    if($nap === '' || $anio === '' || $periodo === ''){
+        echo json_encode(['status' => 'error', 'message' => 'Indica nap, anio y periodo (periodo tal como se guarda, ej. "Periodo 06")']);
+        exit;
+    }
+
+    $rs = $conecta->consulta("SELECT c.nap, c.avs, c.registros, c.pago, COUNT(*) AS folios, SUM(c.saldo) AS saldo_total,
+                                     ROUND(SUM(c.saldo)/100000, 2) AS puntos
+                              FROM cumplimiento c
+                              WHERE c.nap='$nap' AND c.anio='$anio' AND c.periodo='$periodo' AND c.pago=1
+                              GROUP BY c.nap, c.avs, c.registros, c.pago");
+    if(!$rs){ echo json_encode(['status' => 'error', 'message' => mysqli_error($conecta->conexion)]); exit; }
+
+    $grupos = [];
+    while($r = mysqli_fetch_assoc($rs)) $grupos[] = $r;
+    if(!$grupos){
+        echo json_encode(['status' => 'ok', 'aviso' => 'No hay filas en cumplimiento con pago=1 para ese NAP/año/periodo. Revisa cómo se guarda el periodo (SELECT DISTINCT periodo FROM cumplimiento).', 'grupos' => []]);
+        exit;
+    }
+
+    $salida = [];
+    foreach($grupos as $g){
+        $avs  = intval($g['avs']);  $reg = intval($g['registros']);  $pts = $g['puntos'];
+        $esc  = "SELECT categoria, puntos_min, puntos_max FROM esquema_categorias
+                 WHERE $pts >= puntos_min AND ($pts <= puntos_max OR puntos_max IS NULL)";
+        $rc = $conecta->consulta($esc);
+        $cats = [];
+        while($rc && ($r = mysqli_fetch_assoc($rc))) $cats[] = $r;
+
+        $renglones = []; $maxOld = 0; $maxNew = 0;
+        foreach($cats as $c){
+            $cat = mysqli_real_escape_string($conecta->conexion, $c['categoria']);
+            $rb = $conecta->consulta("SELECT categoria, avs, registros, bono FROM esquema_bonos WHERE categoria='$cat' ORDER BY avs, registros");
+            while($rb && ($b = mysqli_fetch_assoc($rb))){
+                $cAvs = (intval($b['avs'])       <= $avs);
+                $cReg = (intval($b['registros']) <= $reg);
+                $old  = ($cAvs || $cReg);
+                $new  = (intval($b['avs']) <= max($avs, $reg));
+                if($old && ($avs >= 1 || $reg >= 1)) $maxOld = max($maxOld, floatval($b['bono']));
+                if($new && ($avs >= 1 || $reg >= 1)) $maxNew = max($maxNew, floatval($b['bono']));
+                $renglones[] = [
+                    'categoria' => $b['categoria'], 'eb_avs' => intval($b['avs']), 'eb_registros' => intval($b['registros']), 'bono' => floatval($b['bono']),
+                    'cumple_por_avs' => $cAvs, 'cumple_por_registros' => $cReg, 'entra_regla_vieja' => $old, 'entra_regla_nueva' => $new,
+                ];
+            }
+        }
+        $salida[] = [
+            'base'              => ['nap' => $g['nap'], 'avs' => $avs, 'registros' => $reg, 'folios' => intval($g['folios']),
+                                    'saldo_total' => floatval($g['saldo_total']), 'puntos' => floatval($pts)],
+            'categorias_que_cubren_los_puntos' => $cats,
+            'aviso_categorias'  => count($cats) === 0 ? 'NINGUNA categoría cubre estos puntos (hueco en esquema_categorias)' : (count($cats) > 1 ? 'MÁS DE UNA categoría cubre estos puntos (traslape)' : 'ok'),
+            'renglones_esquema_bonos' => $renglones,
+            'bono_con_regla_vieja'    => $maxOld,
+            'bono_con_regla_nueva'    => $maxNew,
+        ];
+    }
+
+    echo json_encode(['status' => 'ok', 'regla_en_uso' => 'GREATEST(avs, registros)  [si ves esto, el archivo nuevo SÍ está desplegado]', 'grupos' => $salida]);
+    exit;
+}
+
 if($action === 'getNap')
 {
     $query = mysqli_real_escape_string($conecta->conexion, trim($input['nap'] ?? ''));
@@ -203,7 +388,7 @@ if($action === 'getNap')
     else
         $where = "u.nombre LIKE '%$query%'";
 
-    $sql = "Select n.nap, u.nombre 
+    $sql = "Select n.nap, u.nombre
             FROM naps n
                 LEFT JOIN estruc_empleados ee ON n.no_empleado = ee.no_empleado
                 LEFT JOIN usuarios u ON ee.clave = u.clave

@@ -342,9 +342,9 @@
 				input.value = '';
 
 				Swal.fire({
-					icon: resp.success ? 'success' : 'error',
-					title: resp.success ? 'Listo' : 'Error',
-					html: (resp.mensaje || 'Ocurrió un error inesperado.').replace(/\n/g, '<br>'),
+					icon: resp.ok ? 'success' : 'error',
+					title: resp.ok ? 'Listo' : 'Error',
+					html: (resp.msg || 'Ocurrió un error inesperado.').replace(/\n/g, '<br>'),
 				});
 			})
 			.catch(err => {
